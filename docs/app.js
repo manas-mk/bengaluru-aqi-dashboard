@@ -67,6 +67,17 @@ function aqiBand(aqi) {
   return "HAZARDOUS";
 }
 
+// Standard US EPA / AirNow AQI category guidance text.
+function aqiAdvisory(aqi) {
+  if (aqi == null) return null;
+  if (aqi <= 50) return "Air quality is satisfactory, and air pollution poses little or no risk.";
+  if (aqi <= 100) return "Acceptable, but there may be a risk for people unusually sensitive to air pollution.";
+  if (aqi <= 150) return "Sensitive groups may experience health effects. The general public is less likely to be affected.";
+  if (aqi <= 200) return "Some members of the general public may experience health effects; sensitive groups may experience more serious effects.";
+  if (aqi <= 300) return "Health alert: the risk of health effects is increased for everyone.";
+  return "Health warning of emergency conditions: everyone is more likely to be affected.";
+}
+
 // Heat index (NWS Rothfusz regression). Valid roughly for T >= 27C and RH >= 40%; else returns null.
 function heatIndexC(tC, rh) {
   const tF = tC * 9 / 5 + 32;
@@ -146,7 +157,8 @@ async function fetchForecast() {
 
 async function fetchAirQuality() {
   const url = `${AQ_URL}?latitude=${LAT}&longitude=${LON}&timezone=${encodeURIComponent(TZ)}` +
-    `&current=us_aqi,pm2_5,pm10,nitrogen_dioxide,sulphur_dioxide,ozone,carbon_monoxide`;
+    `&current=us_aqi,pm2_5,pm10,nitrogen_dioxide,sulphur_dioxide,ozone,carbon_monoxide` +
+    `&hourly=us_aqi,pm2_5&forecast_days=3`;
   return fetchJSON(url);
 }
 
@@ -450,6 +462,8 @@ function renderAqiCard() {
   const pill = el("span", "aqi-band-pill", aqiBand(aq.us_aqi));
   pill.style.background = AQI_COLORS[key];
   box.appendChild(pill);
+  const advisory = aqiAdvisory(aq.us_aqi);
+  if (advisory) box.appendChild(el("p", "aqi-advisory", advisory));
   const sub = el("div", "kv-row");
   sub.style.marginTop = "14px";
   sub.appendChild(el("span", "k", "PM2.5"));
@@ -474,6 +488,8 @@ function renderAqiDetail() {
   pill.style.background = AQI_COLORS[key];
   head.appendChild(pill);
   box.appendChild(head);
+  const advisory = aqiAdvisory(aq.us_aqi);
+  if (advisory) box.appendChild(el("p", "aqi-advisory", advisory));
 
   [
     ["PM2.5", aq.pm2_5, "µg/m³"], ["PM10", aq.pm10, "µg/m³"],
@@ -488,6 +504,29 @@ function renderAqiDetail() {
   const note = el("p", "panel-note", "Source: Open-Meteo Air Quality API — a modeled (CAMS) estimate, not a ground-station reading.");
   note.style.marginTop = "12px";
   box.appendChild(note);
+}
+
+/* ============================== AQI FORECAST CHART ============================== */
+function renderAqiForecastChart() {
+  const root = $("#chart-aqi-forecast");
+  if (!root) return;
+  const hourly = state.aq && state.aq.hourly;
+  if (!hourly || !hourly.time) {
+    root.innerHTML = "";
+    root.appendChild(el("p", "panel-error", "Air quality forecast unavailable — retrying in 60s."));
+    return;
+  }
+  const nowT = state.aq.current ? new Date(state.aq.current.time) : new Date();
+  const series = hourly.time.map((t, i) => ({ x: new Date(t), y: hourly.us_aqi[i] }))
+    .filter((p) => p.x.getTime() >= nowT.getTime() - 3600000);
+  drawLineChart(root, {
+    ariaLabel: "US AQI, next 72 hours",
+    height: 180,
+    xTickFmt: (d) => ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][d.getDay()] + " " + pad2(d.getHours()) + ":00",
+    nowX: nowT,
+    yUnit: " AQI",
+    series: [{ data: series, className: "series-a", label: "US AQI", directLabel: true }],
+  });
 }
 
 function flashUpdated() {
@@ -624,7 +663,6 @@ function drawLineChart(root, opts) {
 function renderTodayChart() {
   const { hourly } = state.forecast;
   const idx = state.nowHourlyIdx;
-  const dayStartIdx = idx - (idx % 24 >= 0 ? new Date(hourly.time[idx]).getHours() : 0);
   // Build "today" series: hours 0..23 of today's date, aligned by hour-of-day.
   const todayDate = new Date(hourly.time[idx]).toDateString();
   const yestDate = addDays(new Date(hourly.time[idx]), -1).toDateString();
@@ -770,6 +808,8 @@ function renderRecords() {
     const barWrap = el("div", "percentile-bar");
     const fill = el("div", "fill"); fill.style.width = pct + "%";
     barWrap.appendChild(fill);
+    const median = el("div", "marker"); median.style.left = "50%"; median.title = "50th percentile (typical)";
+    barWrap.appendChild(median);
     box.appendChild(barWrap);
   }
 
@@ -1076,6 +1116,30 @@ function renderFooter() {
     `All fetches run client-side; no server, no API key. Coordinates ${LAT}, ${LON}.`;
 }
 
+/* ============================== INDEPENDENT FEED RETRY ============================== */
+// AQ and historical each get their own 60s retry loop on failure, independent of the 10-min
+// main refresh cycle, so the "retrying in 60s" copy shown in their panels is actually true.
+const feedRetryTimers = { aq: null, hist: null };
+function scheduleFeedRetry(kind) {
+  clearTimeout(feedRetryTimers[kind]);
+  feedRetryTimers[kind] = setTimeout(async () => {
+    if (nextRefreshAt != null && Date.now() >= nextRefreshAt) return; // main refresh will cover it
+    try {
+      if (kind === "aq") {
+        state.aq = await fetchAirQuality();
+        if (document.body.dataset.tab === "now") renderAqiCard();
+        if (document.body.dataset.tab === "wind") { renderAqiDetail(); renderAqiForecastChart(); }
+      } else {
+        const histRes = await fetchHistorical();
+        state.historicalDaily = mergeDailyMaps(histRes.daily, dailyFromHourly(state.forecast.hourly));
+        if (document.body.dataset.tab === "trends") { renderRecords(); renderRainfall(); renderCalendar(); }
+      }
+    } catch (e) {
+      scheduleFeedRetry(kind);
+    }
+  }, 60000);
+}
+
 /* ============================== LOAD / ORCHESTRATION ============================== */
 async function loadAll(isRefresh) {
   if (!isRefresh) {
@@ -1089,6 +1153,7 @@ async function loadAll(isRefresh) {
     $("#rainfall-box").innerHTML = '<div class="skel skel-line"></div><div class="skel skel-block" style="height:60px"></div>';
     $("#windrose-box").innerHTML = '<div class="skel skel-block" style="height:220px"></div>';
     $("#aqi-detail-box").innerHTML = '<div class="skel skel-line"></div><div class="skel skel-line"></div><div class="skel skel-line"></div>';
+    $("#chart-aqi-forecast").innerHTML = '<div class="skel skel-block"></div>';
     $("#comfort-grid").innerHTML = Array(3).fill('<div class="box"><div class="skel skel-line" style="height:30px"></div></div>').join("");
   }
   setStatus("Refreshing…");
@@ -1109,15 +1174,18 @@ async function loadAll(isRefresh) {
   }
 
   state.aq = aqRes.status === "fulfilled" ? aqRes.value : null;
-  if (aqRes.status !== "fulfilled") console.warn("AQ fetch failed", aqRes.reason);
+  if (aqRes.status !== "fulfilled") { console.warn("AQ fetch failed", aqRes.reason); scheduleFeedRetry("aq"); }
+  else clearTimeout(feedRetryTimers.aq);
 
   if (histRes.status === "fulfilled") {
     const archiveDaily = histRes.value.daily;
     const derived = dailyFromHourly(state.forecast.hourly);
     state.historicalDaily = mergeDailyMaps(archiveDaily, derived);
+    clearTimeout(feedRetryTimers.hist);
   } else {
     state.historicalDaily = null;
     console.warn("Historical fetch failed", histRes.reason);
+    scheduleFeedRetry("hist");
   }
 
   render(isRefresh);
@@ -1147,6 +1215,7 @@ function renderTrendsTab() {
 function renderWindTab() {
   renderWindRose();
   renderAqiDetail();
+  renderAqiForecastChart();
   renderComfort();
 }
 const TAB_RENDERERS = { now: renderNowTab, forecast: renderForecastTab, trends: renderTrendsTab, wind: renderWindTab };
@@ -1169,6 +1238,7 @@ function initTheme() {
     const cur = document.documentElement.getAttribute("data-theme") ||
       (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
     btn.textContent = cur === "dark" ? "LIGHT" : "DARK";
+    btn.setAttribute("aria-pressed", cur === "dark");
   }
   label();
   btn.addEventListener("click", () => {
@@ -1233,10 +1303,14 @@ function playIntro() {
 }
 
 /* ============================== INIT ============================== */
+let resizeDebounce = null;
 window.addEventListener("resize", () => {
-  if (!state.forecast) return;
-  const active = document.body.dataset.tab || "now";
-  if (TAB_RENDERERS[active]) TAB_RENDERERS[active]();
+  clearTimeout(resizeDebounce);
+  resizeDebounce = setTimeout(() => {
+    if (!state.forecast) return;
+    const active = document.body.dataset.tab || "now";
+    if (TAB_RENDERERS[active]) TAB_RENDERERS[active]();
+  }, 150);
 });
 
 playIntro();

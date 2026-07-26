@@ -5,6 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bengaluru — Weather Instrument</title>
 <meta name="description" content="An exhaustive statistical instrument for Bengaluru weather, air quality, and climate: live conditions, forecasts, records, and trends.">
+<meta name="theme-color" content="#0a1428">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Bengaluru — Weather Instrument">
+<meta property="og:description" content="Live Bengaluru weather, air quality, forecasts, and 10-year climate records — no backend, no build step, fully client-side.">
+<meta name="twitter:card" content="summary">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%2316305c'/%3E%3Ccircle cx='50' cy='50' r='20' fill='%236ea1ff'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -150,6 +156,14 @@
           <h2 class="eyebrow">Air Quality Detail</h2>
           <div id="aqi-detail-box"></div>
         </div>
+      </div>
+
+      <div class="panel-card">
+        <div class="panel-head">
+          <h2 class="eyebrow">72-Hour Air Quality Forecast</h2>
+          <span class="panel-note">US AQI, Asia/Kolkata</span>
+        </div>
+        <div id="chart-aqi-forecast" class="chart-wrap"></div>
       </div>
 
       <div class="panel-card">
