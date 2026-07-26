@@ -1,5 +1,5 @@
 {
-  "generated": "2026-07-26T18:21:16.172Z",
+  "generated": "2026-07-26T19:46:36.148Z",
   "lead_hours": [
     24,
     48,
@@ -27,6 +27,12 @@
           "tmax": 28.9,
           "tmin": 20.8,
           "precip": 3.2
+        },
+        "24h": {
+          "made_on": "2026-07-27",
+          "tmax": 29.2,
+          "tmin": 20.6,
+          "precip": 1.9
         }
       },
       "actual": null,
@@ -40,6 +46,25 @@
           "tmax": 28,
           "tmin": 21.2,
           "precip": 2
+        },
+        "48h": {
+          "made_on": "2026-07-27",
+          "tmax": 28.4,
+          "tmin": 21,
+          "precip": 0.8
+        }
+      },
+      "actual": null,
+      "errors": {}
+    },
+    {
+      "target_date": "2026-07-30",
+      "predictions": {
+        "72h": {
+          "made_on": "2026-07-27",
+          "tmax": 29.8,
+          "tmin": 21,
+          "precip": 2.7
         }
       },
       "actual": null,
