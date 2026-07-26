@@ -152,7 +152,7 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible, input:focus-vis
    ============================================================ */
 .topbar { display: flex; align-items: center; justify-content: space-between; padding: 24px 0 16px; gap: 16px; flex-wrap: wrap; }
 .topbar .brand { display: flex; align-items: baseline; gap: 8px; }
-.topbar .brand h1 { font-size: 17px; font-weight: 800; letter-spacing: 0.01em; margin: 0; }
+.topbar .brand h1 { display: flex; align-items: baseline; gap: 8px; font-size: 17px; font-weight: 800; letter-spacing: 0.01em; margin: 0; }
 .topbar .brand .sub { font-size: 11px; color: var(--text-low); letter-spacing: 0.08em; text-transform: uppercase; }
 .topbar .status { display: flex; align-items: center; gap: 16px; font-size: 11px; color: var(--text-low); letter-spacing: 0.02em; }
 .topbar .status .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--good); display: inline-block; margin-right: 6px; box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 25%, transparent); }
