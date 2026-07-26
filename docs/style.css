@@ -307,8 +307,10 @@ body {
     linear-gradient(135deg, #2a78d6, #16305c);
   border: 1px solid rgba(255,255,255,.22);
   box-shadow: 0 20px 50px -20px rgba(20,60,140,.5), inset 0 1px 0 rgba(255,255,255,.3);
-  transition: background 1s ease;
+  transition: background 1s ease, transform .15s ease;
+  transform-style: preserve-3d;
 }
+@media (prefers-reduced-motion: reduce) { .hero-card { transition: background 1s ease; } }
 .hero-card::after {
   content: ""; position: absolute; inset: 0; opacity: .05; mix-blend-mode: overlay; pointer-events: none;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
@@ -381,7 +383,15 @@ body {
 .stat-card .arrow.up { color: var(--tab-accent, var(--accent)); }
 .stat-card .arrow.down { color: var(--bad); }
 
-.grid-2.spaced { gap: 22px; }
+/* True masonry, not a shared grid row: with CSS grid, align-items:start stops a shorter
+   box from being *stretched*, but the row track itself still sizes to the tallest sibling,
+   so the dead space just moves outside the box instead of vanishing. Multi-column layout
+   sizes each column to its own content instead — with exactly two break-inside:avoid blocks,
+   the balancing algorithm always splits them one per column (any other split leaves a
+   column empty, which is never "more balanced"), so there's no shared height to mismatch. */
+.grid-2.spaced { display: block; column-count: 2; column-gap: 22px; }
+.grid-2.spaced > * { break-inside: avoid; }
+@media (max-width: 640px) { .grid-2.spaced { column-count: 1; } }
 @media (prefers-reduced-motion: reduce) {
   .hero-temp.kinetic .num { animation: none; }
   .hero-temp .num { transition: none; }

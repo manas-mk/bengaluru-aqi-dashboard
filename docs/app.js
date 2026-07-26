@@ -1647,6 +1647,23 @@ function playIntro() {
   }, 1600);
 }
 
+/* ============================== HERO TILT ============================== */
+// A restrained mouse-tracked tilt on the single most prominent element on the page — real
+// depth on hover, not a scattered effect on every card. Skipped entirely under
+// prefers-reduced-motion and on touch (no pointermove without a hover-capable pointer).
+function initHeroTilt() {
+  const card = $("#hero-card");
+  if (!card || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  card.addEventListener("pointermove", (e) => {
+    if (e.pointerType === "touch") return;
+    const rect = card.getBoundingClientRect();
+    const px = (e.clientX - rect.left) / rect.width - 0.5;
+    const py = (e.clientY - rect.top) / rect.height - 0.5;
+    card.style.transform = `perspective(900px) rotateX(${(-py * 4).toFixed(2)}deg) rotateY(${(px * 5).toFixed(2)}deg)`;
+  });
+  card.addEventListener("pointerleave", () => { card.style.transform = ""; });
+}
+
 /* ============================== INIT ============================== */
 let resizeDebounce = null;
 window.addEventListener("resize", () => {
@@ -1662,5 +1679,6 @@ playIntro();
 initTheme();
 initTrendToggle();
 initForecastExpand();
+initHeroTilt();
 initTabs();
 loadAll(false);
