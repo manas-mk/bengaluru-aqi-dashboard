@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@100..800&family=Inter:wght@400;500;600;700;800&family=Fraunces:ital,wght@0,500;0,600;1,500;1,600&display=swap');
 
 :root {
   --bg: #eef1fb;
@@ -22,6 +22,7 @@
   --shadow-card: 0 1px 1px rgba(31,38,135,.06), 0 16px 40px -20px rgba(31,38,135,.28), inset 0 1px 0 rgba(255,255,255,.5);
   --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', 'Cascadia Code', Consolas, monospace;
   --sans: 'Inter', system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
+  --serif: 'Fraunces', 'Source Serif 4', Georgia, serif;
   --glass-bg: rgba(255,255,255,.5);
   --glass-bg-strong: rgba(255,255,255,.72);
   --glass-border: rgba(255,255,255,.65);
@@ -218,6 +219,21 @@ body {
 .panel-note { font-size: 11px; color: var(--ink-3); }
 .eyebrow-sm { font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-2); margin: 0 0 8px; }
 
+/* ---------- Editorial typography (Trends & Records tab only) ---------- */
+#tab-trends .eyebrow {
+  font-family: var(--serif); font-style: italic; font-weight: 600; text-transform: none;
+  letter-spacing: 0; font-size: 21px; color: var(--ink); margin-bottom: 20px;
+}
+#tab-trends .eyebrow::before { width: 7px; height: 7px; margin-top: 1px; }
+#tab-trends .panel-head .eyebrow { margin-bottom: 0; }
+#tab-trends .panel-card { padding: 30px 32px; margin-bottom: 26px; }
+#tab-trends .box h3 { letter-spacing: 0.08em; }
+.pull-quote {
+  font-family: var(--serif); font-style: italic; font-weight: 500; font-size: 21px; line-height: 1.45;
+  color: var(--ink); border-left: 3px solid var(--tab-accent, var(--accent));
+  padding: 2px 0 2px 20px; margin: 18px 0 4px;
+}
+
 /* ---------- Cards (glass) ---------- */
 .panel-card {
   background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: var(--radius);
@@ -226,14 +242,55 @@ body {
   min-width: 0;
 }
 
+/* ---------- Bento grid (Now tab) ---------- */
+.bento-grid {
+  display: grid; gap: 16px; margin-bottom: 22px;
+  grid-template-columns: repeat(4, 1fr);
+  grid-auto-rows: minmax(108px, auto);
+  grid-template-areas:
+    "hero hero humid pressure"
+    "hero hero wind wind"
+    "dew uv vis precip"
+    "sun sun aqi aqi";
+}
+.bento-grid > .hero-card, .bento-grid > .panel-card, #now-stats > .stat-card { margin-bottom: 0; }
+#now-stats { display: contents; }
+.area-hero { grid-area: hero; }
+.area-sun { grid-area: sun; }
+.area-aqi { grid-area: aqi; }
+.area-dew { grid-area: dew; }
+.area-humid { grid-area: humid; }
+.area-pressure { grid-area: pressure; }
+.area-wind { grid-area: wind; }
+.area-uv { grid-area: uv; }
+.area-vis { grid-area: vis; }
+.area-precip { grid-area: precip; }
+@media (max-width: 860px) {
+  .bento-grid {
+    grid-template-columns: repeat(2, 1fr);
+    grid-template-areas:
+      "hero hero"
+      "wind wind"
+      "humid pressure"
+      "dew uv"
+      "vis precip"
+      "sun sun"
+      "aqi aqi";
+  }
+}
+
 /* ---------- Hero (Now tab) ---------- */
 .hero-card {
-  border-radius: 24px; padding: 40px 36px; margin-bottom: 24px; color: #fff; position: relative;
+  border-radius: 24px; padding: 40px 36px; color: #fff; position: relative;
   overflow: hidden; display: flex; align-items: center; gap: 32px; flex-wrap: wrap;
   background: linear-gradient(135deg, #2a78d6, #16305c);
   border: 1px solid rgba(255,255,255,.22);
   box-shadow: 0 20px 50px -20px rgba(20,60,140,.5), inset 0 1px 0 rgba(255,255,255,.3);
   transition: background 1s ease;
+}
+.hero-card::after {
+  content: ""; position: absolute; inset: 0; opacity: .05; mix-blend-mode: overlay; pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 .hero-card.tod-night { background: linear-gradient(135deg, #1a2140, #05070f); box-shadow: 0 20px 50px -20px rgba(5,10,30,.6); }
 .hero-card.tod-dawn  { background: linear-gradient(135deg, #ff9a6c, #6a5acd 70%); box-shadow: 0 20px 50px -20px rgba(140,90,140,.5); }
@@ -242,20 +299,21 @@ body {
 .hero-icon { width: 96px; height: 96px; flex: none; }
 .hero-main { flex: 1; min-width: 200px; }
 .hero-temp { font-size: 68px; font-weight: 700; line-height: 1; display: flex; align-items: flex-start; }
-.hero-temp .num { font-family: var(--mono); }
+.hero-temp .num { font-family: var(--mono); font-weight: var(--temp-weight, 700); transition: font-weight .5s ease; }
+.hero-temp.kinetic .num { animation: tempSettle .9s cubic-bezier(.16,1,.3,1); }
+@keyframes tempSettle { 0% { font-weight: 300; } 60% { font-weight: 850; } 100% { font-weight: var(--temp-weight, 700); } }
 .hero-deg { font-size: 28px; font-weight: 500; opacity: .85; margin-top: 4px; margin-left: 2px; }
 .hero-condition { font-size: 16px; font-weight: 600; margin-top: 6px; }
 .hero-feels { font-size: 13px; opacity: .8; margin-top: 4px; }
 .hero-meta { text-align: right; font-size: 11.5px; opacity: .85; line-height: 1.8; font-family: var(--mono); }
 @media (max-width: 700px) { .hero-card { padding: 28px 24px; } .hero-meta { text-align: left; width: 100%; } }
 
-/* ---------- Spacious stat grid (Now tab) ---------- */
-.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 22px; }
+/* ---------- Stat cards (Now tab) ---------- */
 .stat-card {
   background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: var(--radius-sm);
   padding: 18px 20px; box-shadow: var(--shadow-card); transition: transform .15s ease, box-shadow .15s ease;
   backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
-  min-width: 0;
+  min-width: 0; display: flex; flex-direction: column; justify-content: center;
 }
 .stat-card:hover { transform: translateY(-2px); }
 .stat-card .s-label { font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 10px; }
@@ -270,6 +328,10 @@ body {
 .stat-card .arrow.down { color: var(--bad); }
 
 .grid-2.spaced { gap: 22px; }
+@media (prefers-reduced-motion: reduce) {
+  .hero-temp.kinetic .num { animation: none; }
+  .hero-temp .num { transition: none; }
+}
 
 /* Sun/AQI mini cards content */
 .kv-row { display: flex; justify-content: space-between; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--rule); font-size: 13px; }
@@ -285,6 +347,21 @@ body {
   padding: 4px 10px; border-radius: 999px; color: #fff;
 }
 .aqi-advisory { font-size: 12px; color: var(--ink-2); line-height: 1.5; margin: 10px 0 0; }
+
+/* ---------- Pollutant bars (Wind & Air tab) ---------- */
+.pollutant-row { padding: 9px 0; border-bottom: 1px solid var(--rule); border-radius: 6px; transition: background-color .15s ease; cursor: default; }
+.pollutant-row:last-child { border-bottom: none; }
+.pollutant-row:hover { background: color-mix(in srgb, var(--tab-accent, var(--accent)) 8%, transparent); }
+.pollutant-row .kv-row { border-bottom: none; padding: 0 0 6px; }
+.pollutant-track { height: 5px; background: var(--rule); border-radius: 999px; overflow: hidden; }
+.pollutant-fill {
+  height: 100%; width: 0%; border-radius: 999px; background: var(--tab-accent, var(--accent));
+  transition: width 1s cubic-bezier(.16,1,.3,1);
+}
+.pollutant-row:hover .pollutant-fill { filter: brightness(1.15); }
+@media (prefers-reduced-motion: reduce) {
+  .pollutant-fill { transition: none; }
+}
 
 /* ---------- Grid of panels ---------- */
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
@@ -345,6 +422,16 @@ body {
 
 /* ---------- Table ---------- */
 .table-scroll { overflow-x: auto; border: 1px solid var(--glass-border); border-radius: var(--radius-sm); }
+.table-scroll.collapsed tbody tr:nth-child(n+13) { display: none; }
+.expand-btn {
+  display: flex; align-items: center; gap: 6px; margin: 14px auto 0; padding: 8px 18px;
+  font-family: var(--sans); font-size: 12.5px; font-weight: 600; color: var(--ink-2);
+  background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 999px; cursor: pointer;
+  backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+  transition: color .15s ease, border-color .15s ease;
+}
+.expand-btn:hover { color: var(--ink); border-color: var(--tab-accent, var(--accent)); }
+.expand-btn .chevron { font-size: 14px; line-height: 1; }
 table.instrument { border-collapse: collapse; width: 100%; min-width: 760px; font-family: var(--mono); font-size: 12px; }
 table.instrument caption { text-align: left; padding: 10px 14px; font-family: var(--sans); font-size: 11px; color: var(--ink-3); }
 table.instrument th, table.instrument td { text-align: right; padding: 8px 14px; white-space: nowrap; }
@@ -392,6 +479,11 @@ table.instrument tbody tr.now-row td:first-child, table.instrument tbody tr.now-
 
 /* ---------- Wind rose ---------- */
 .windrose-wrap { display: flex; gap: 24px; align-items: center; flex-wrap: wrap; }
+.rose-petal { transform-origin: 110px 110px; transform: scale(0); transition: transform .6s cubic-bezier(.16,1,.3,1); }
+.windrose-wrap.grown .rose-petal { transform: scale(1); }
+@media (prefers-reduced-motion: reduce) {
+  .rose-petal { transition: none; transform: scale(1); }
+}
 .windrose-legend { display: flex; flex-direction: column; gap: 6px; font-size: 10.5px; color: var(--ink-2); }
 .windrose-legend .sw { width: 11px; height: 11px; border-radius: 3px; display: inline-block; margin-right: 6px; vertical-align: middle; }
 

@@ -58,27 +58,27 @@
   <main>
     <!-- ============ NOW ============ -->
     <section class="tab-panel active" id="tab-now" role="tabpanel">
-      <div class="hero-card" id="hero-card">
-        <div class="hero-icon" id="hero-icon"></div>
-        <div class="hero-main">
-          <div class="hero-temp"><span class="num" id="hero-temp">--</span><span class="hero-deg">°C</span></div>
-          <div class="hero-condition" id="hero-condition">Loading…</div>
-          <div class="hero-feels" id="hero-feels"></div>
+      <div class="bento-grid" id="now-bento">
+        <div class="hero-card area-hero" id="hero-card">
+          <div class="hero-icon" id="hero-icon"></div>
+          <div class="hero-main">
+            <div class="hero-temp"><span class="num" id="hero-temp">--</span><span class="hero-deg">°C</span></div>
+            <div class="hero-condition" id="hero-condition">Loading…</div>
+            <div class="hero-feels" id="hero-feels"></div>
+          </div>
+          <div class="hero-meta">
+            <div id="hero-updated">—</div>
+            <div id="hero-range">—</div>
+          </div>
         </div>
-        <div class="hero-meta">
-          <div id="hero-updated">—</div>
-          <div id="hero-range">—</div>
-        </div>
-      </div>
 
-      <div class="stat-grid" id="now-stats"></div>
+        <div id="now-stats"></div>
 
-      <div class="grid-2 spaced">
-        <div class="panel-card" id="sun-card">
+        <div class="panel-card area-sun" id="sun-card">
           <h3 class="eyebrow">Sun &amp; Moon</h3>
           <div id="sun-body"></div>
         </div>
-        <div class="panel-card" id="aqi-card">
+        <div class="panel-card area-aqi" id="aqi-card">
           <h3 class="eyebrow">Air Quality</h3>
           <div id="aqi-body"></div>
         </div>
@@ -100,7 +100,7 @@
           <h2 class="eyebrow">48-Hour Forecast</h2>
           <span class="panel-note">Hourly, Asia/Kolkata</span>
         </div>
-        <div class="table-scroll">
+        <div class="table-scroll collapsed" id="forecast-table-scroll">
           <table class="instrument" id="forecast-table">
             <caption>Hourly forecast for the next 48 hours: temperature, feels-like, rain probability and amount, wind, humidity, pressure.</caption>
             <thead>
@@ -118,6 +118,9 @@
             <tbody id="forecast-tbody"></tbody>
           </table>
         </div>
+        <button class="expand-btn" id="forecast-expand-btn" type="button" aria-expanded="false" aria-controls="forecast-table-scroll">
+          Show all 48 hours <span class="chevron">⌄</span>
+        </button>
       </div>
     </section>
 

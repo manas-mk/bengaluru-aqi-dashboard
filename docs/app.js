@@ -23,6 +23,11 @@ function fmt(n, d) {
   return Number(n).toFixed(d == null ? 1 : d);
 }
 function pad2(n) { return String(n).padStart(2, "0"); }
+function ordinal(n) {
+  const v = n % 100;
+  if (v >= 11 && v <= 13) return n + "th";
+  return n + ({ 1: "st", 2: "nd", 3: "rd" }[n % 10] || "th");
+}
 function isoDate(d) { return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()); }
 function addDays(d, n) { const c = new Date(d); c.setDate(c.getDate() + n); return c; }
 function dayOfYear(d) { const start = new Date(d.getFullYear(), 0, 0); return Math.floor((d - start) / 86400000); }
@@ -343,8 +348,8 @@ function pressureTrend(hourly, idx) {
   return { dir: "steady", delta };
 }
 
-function statCard(label, valueHTML, subHTML) {
-  const d = el("div", "stat-card");
+function statCard(label, valueHTML, subHTML, areaClass) {
+  const d = el("div", "stat-card" + (areaClass ? " " + areaClass : ""));
   d.appendChild(el("div", "s-label", label));
   const v = el("div", "s-value num");
   v.innerHTML = valueHTML;
@@ -355,6 +360,38 @@ function statCard(label, valueHTML, subHTML) {
     d.appendChild(s);
   }
   return d;
+}
+
+// Kinetic numeral: the hero temperature's variable-font weight tracks the value itself
+// (hotter reads heavier), on a modest 500-800 range so it stays legible, not cartoonish.
+function tempToWeight(tempC) {
+  const clamped = Math.max(15, Math.min(40, tempC));
+  return Math.round(500 + ((clamped - 15) / 25) * 300);
+}
+
+function isDarkTheme() {
+  const explicit = document.documentElement.getAttribute("data-theme");
+  if (explicit) return explicit === "dark";
+  return window.matchMedia("(prefers-color-scheme: dark)").matches;
+}
+
+// The Now tab's accent color derives from the current sky gradient (dawn/dusk/night get
+// their own hue) instead of staying the fixed default blue — reusing the same orange/violet
+// already established for the Wind/Trends tabs, so no new colors enter the palette.
+function todAccentColor(tod) {
+  if (tod === "day") return null;
+  const dark = isDarkTheme();
+  if (tod === "dawn" || tod === "dusk") return dark ? "#ff9459" : "#e8783f";
+  if (tod === "night") return dark ? "#9c8bf0" : "#7a63e8";
+  return null;
+}
+
+function applyNowAccent() {
+  if (document.body.dataset.tab !== "now" || !state.todAccentColor) {
+    document.body.style.removeProperty("--tab-accent");
+    return;
+  }
+  document.body.style.setProperty("--tab-accent", state.todAccentColor);
 }
 
 function renderHero() {
@@ -368,6 +405,7 @@ function renderHero() {
   card.className = "hero-card tod-" + tod;
   $("#hero-icon").innerHTML = weatherIconSVG(current.weather_code, current.is_day);
   $("#hero-temp").textContent = fmt(current.temperature_2m, 1);
+  $("#hero-temp").style.setProperty("--temp-weight", tempToWeight(current.temperature_2m));
   $("#hero-condition").textContent = weatherConditionLabel(current.weather_code);
   $("#hero-feels").textContent = `Feels like ${fmt(current.apparent_temperature, 1)}°C · Dew point ${fmt(current.dew_point_2m, 1)}°C`;
 
@@ -375,6 +413,9 @@ function renderHero() {
   $("#hero-updated").textContent = `AS OF ${weatherTime}`;
   const r24temp = last24hRange(hourly, idx, "temperature_2m");
   $("#hero-range").textContent = r24temp ? `24H ${fmt(r24temp.min, 1)}–${fmt(r24temp.max, 1)}°C` : "";
+
+  state.todAccentColor = todAccentColor(tod);
+  applyNowAccent();
 }
 
 function renderNowStats() {
@@ -384,31 +425,31 @@ function renderNowStats() {
   const grid = $("#now-stats");
   grid.innerHTML = "";
 
-  grid.appendChild(statCard("Dew Point", `${fmt(current.dew_point_2m, 1)}<span class="unit">°C</span>`, "Condensation threshold"));
+  grid.appendChild(statCard("Dew Point", `${fmt(current.dew_point_2m, 1)}<span class="unit">°C</span>`, "Condensation threshold", "area-dew"));
 
   const r24hum = last24hRange(hourly, idx, "relative_humidity_2m");
   grid.appendChild(statCard("Humidity", `${fmt(current.relative_humidity_2m, 0)}<span class="unit">%</span>`,
-    r24hum ? `24H range ${fmt(r24hum.min, 0)}–${fmt(r24hum.max, 0)}%` : ""));
+    r24hum ? `24H range ${fmt(r24hum.min, 0)}–${fmt(r24hum.max, 0)}%` : "", "area-humid"));
 
   const pt = pressureTrend(hourly, idx);
   const arrowGlyph = pt.dir === "rising" ? "▲" : pt.dir === "falling" ? "▼" : "→";
   const arrowClass = pt.dir === "rising" ? "up" : pt.dir === "falling" ? "down" : "";
   grid.appendChild(statCard("Pressure", `${fmt(current.pressure_msl, 1)}<span class="unit">hPa</span><span class="arrow ${arrowClass}">${arrowGlyph}</span>`,
-    `3h trend: <span class="accent">${pt.dir}</span> ${fmt(Math.abs(pt.delta), 1)} hPa`));
+    `3h trend: <span class="accent">${pt.dir}</span> ${fmt(Math.abs(pt.delta), 1)} hPa`, "area-pressure"));
 
   const windArrow = `<svg class="vec" width="14" height="14" viewBox="0 0 12 12" style="transform:rotate(${current.wind_direction_10m}deg)"><path d="M6 1 L9 8 L6 6 L3 8 Z" fill="currentColor"/></svg>`;
   grid.appendChild(statCard("Wind", `${fmt(current.wind_speed_10m, 1)}<span class="unit">km/h</span>${windArrow}`,
-    `From ${fmt(current.wind_direction_10m, 0)}° ${degToCompass(current.wind_direction_10m)} · gusts ${fmt(current.wind_gusts_10m, 1)} km/h`));
+    `From ${fmt(current.wind_direction_10m, 0)}° ${degToCompass(current.wind_direction_10m)} · gusts ${fmt(current.wind_gusts_10m, 1)} km/h`, "area-wind"));
 
   const vis = hourly.visibility[idx];
-  grid.appendChild(statCard("Visibility", vis != null ? `${fmt(vis / 1000, 1)}<span class="unit">km</span>` : "—", "Cloud cover " + fmt(current.cloud_cover, 0) + "%"));
+  grid.appendChild(statCard("Visibility", vis != null ? `${fmt(vis / 1000, 1)}<span class="unit">km</span>` : "—", "Cloud cover " + fmt(current.cloud_cover, 0) + "%", "area-vis"));
 
-  grid.appendChild(statCard("UV Index", `${fmt(current.uv_index, 1)}`, `<span class="accent">${uvBand(current.uv_index)}</span>`));
+  grid.appendChild(statCard("UV Index", `${fmt(current.uv_index, 1)}`, `<span class="accent">${uvBand(current.uv_index)}</span>`, "area-uv"));
 
   const todayPrecip = daily.precipitation_sum[todayIdx];
   const rainProb = hourly.precipitation_probability[idx];
   grid.appendChild(statCard("Precipitation", `${fmt(current.precipitation, 1)}<span class="unit">mm/hr</span>`,
-    `${fmt(rainProb, 0)}% chance next hour · ${fmt(todayPrecip, 1)}mm today`));
+    `${fmt(rainProb, 0)}% chance next hour · ${fmt(todayPrecip, 1)}mm today`, "area-precip"));
 }
 
 function renderSunCard() {
@@ -497,17 +538,29 @@ function renderAqiDetail() {
   const advisory = aqiAdvisory(aq.us_aqi);
   if (advisory) box.appendChild(el("p", "aqi-advisory", advisory));
 
+  const pollutants = el("div", "pollutant-list");
   [
-    ["PM2.5", aq.pm2_5, "µg/m³"], ["PM10", aq.pm10, "µg/m³"],
-    ["Nitrogen Dioxide (NO₂)", aq.nitrogen_dioxide, "µg/m³"], ["Sulphur Dioxide (SO₂)", aq.sulphur_dioxide, "µg/m³"],
-    ["Ozone (O₃)", aq.ozone, "µg/m³"], ["Carbon Monoxide (CO)", aq.carbon_monoxide, "µg/m³"],
-  ].forEach(([label, val, unit]) => {
-    const row = el("div", "kv-row");
-    row.appendChild(el("span", "k", label));
-    row.appendChild(el("span", "v num", fmt(val, 1) + " " + unit));
-    box.appendChild(row);
+    ["PM2.5", aq.pm2_5, "µg/m³", 100], ["PM10", aq.pm10, "µg/m³", 150],
+    ["Nitrogen Dioxide (NO₂)", aq.nitrogen_dioxide, "µg/m³", 200], ["Sulphur Dioxide (SO₂)", aq.sulphur_dioxide, "µg/m³", 350],
+    ["Ozone (O₃)", aq.ozone, "µg/m³", 180], ["Carbon Monoxide (CO)", aq.carbon_monoxide, "µg/m³", 4000],
+  ].forEach(([label, val, unit, ref]) => {
+    const row = el("div", "pollutant-row");
+    row.title = `${label}: ${fmt(val, 1)} ${unit}`;
+    const top = el("div", "kv-row");
+    top.appendChild(el("span", "k", label));
+    top.appendChild(el("span", "v num", fmt(val, 1) + " " + unit));
+    row.appendChild(top);
+    const track = el("div", "pollutant-track");
+    const fill = el("div", "pollutant-fill");
+    track.appendChild(fill);
+    row.appendChild(track);
+    pollutants.appendChild(row);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      fill.style.width = val != null ? Math.min(100, (val / ref) * 100) + "%" : "0%";
+    }));
   });
-  const note = el("p", "panel-note", "Source: Open-Meteo Air Quality API — a modeled (CAMS) estimate, not a ground-station reading.");
+  box.appendChild(pollutants);
+  const note = el("p", "panel-note", "Source: Open-Meteo Air Quality API — a modeled (CAMS) estimate, not a ground-station reading. Bars are scaled for relative reference, not an official index.");
   note.style.marginTop = "12px";
   box.appendChild(note);
 }
@@ -540,6 +593,11 @@ function flashUpdated() {
     v.classList.add("fade");
     setTimeout(() => v.classList.remove("fade"), 320);
   });
+  const heroTemp = $(".hero-temp");
+  if (heroTemp) {
+    heroTemp.classList.add("kinetic");
+    setTimeout(() => heroTemp.classList.remove("kinetic"), 950);
+  }
 }
 
 /* ============================== GENERIC CHART ============================== */
@@ -826,6 +884,12 @@ function renderRecords() {
     const median = el("div", "marker"); median.style.left = "50%"; median.title = "50th percentile (typical)";
     barWrap.appendChild(median);
     box.appendChild(barWrap);
+
+    const rank = highs.filter((h) => h > todayHigh).length + 1;
+    const monthDayLabel = new Date().toLocaleDateString(undefined, { month: "long", day: "numeric" });
+    const totalYears = highs.length + 1;
+    box.appendChild(el("p", "pull-quote",
+      `Today's high of ${fmt(todayHigh, 1)}°C is the ${ordinal(rank)} hottest ${monthDayLabel} in ${totalYears} years of record.`));
   }
 
   if (highs.length) {
@@ -944,6 +1008,13 @@ function renderRainfall() {
   const note = el("div", "panel-note", `Normal = ${years.size}-year average for the equivalent period. Accent mark = normal.`);
   note.style.marginTop = "6px";
   box.appendChild(note);
+
+  if (mtdNormal) {
+    const pctVsNormal = Math.round(((mtdActual - mtdNormal) / mtdNormal) * 100);
+    const monthName = now.toLocaleDateString(undefined, { month: "long" });
+    box.appendChild(el("p", "pull-quote",
+      `This month's rainfall is ${Math.abs(pctVsNormal)}% ${pctVsNormal >= 0 ? "above" : "below"} normal for ${monthName} so far.`));
+  }
 }
 
 /* ============================== CALENDAR HEATMAP ============================== */
@@ -1134,6 +1205,8 @@ function renderWindRose() {
       path.setAttribute("fill", blues[s]);
       path.setAttribute("stroke", "var(--panel)");
       path.setAttribute("stroke-width", "1");
+      path.setAttribute("class", "rose-petal");
+      path.style.transitionDelay = (b * 0.025) + "s";
       const pct = Math.round((count / total) * 1000) / 10;
       const t = document.createElementNS(svgNS, "title");
       t.textContent = `${degToCompass(b * (360 / buckets))}, ${speedBands[s].label} km/h: ${pct}%`;
@@ -1152,6 +1225,7 @@ function renderWindRose() {
   });
   wrap.appendChild(legend);
   box.appendChild(wrap);
+  requestAnimationFrame(() => requestAnimationFrame(() => wrap.classList.add("grown")));
 }
 
 /* ============================== COMFORT METRICS ============================== */
@@ -1358,6 +1432,21 @@ function initTrendToggle() {
   });
 }
 
+/* ============================== FORECAST TABLE EXPAND ============================== */
+// Progressive disclosure: the 48h table shows just the next 12 hours by default; the full
+// table is one click away. The "collapsed" class lives on the wrapper, not the tbody, so the
+// user's choice survives the 10-minute data refresh without any extra bookkeeping.
+function initForecastExpand() {
+  const btn = $("#forecast-expand-btn");
+  const wrap = $("#forecast-table-scroll");
+  if (!btn || !wrap) return;
+  btn.addEventListener("click", () => {
+    const collapsed = wrap.classList.toggle("collapsed");
+    btn.setAttribute("aria-expanded", String(!collapsed));
+    btn.innerHTML = collapsed ? 'Show all 48 hours <span class="chevron">⌄</span>' : 'Show fewer hours <span class="chevron">⌃</span>';
+  });
+}
+
 /* ============================== TABS ============================== */
 function initTabs() {
   const buttons = document.querySelectorAll(".tab-btn");
@@ -1371,6 +1460,7 @@ function initTabs() {
         p.hidden = !isTarget;
       });
       document.body.dataset.tab = name;
+      applyNowAccent();
       if (state.forecast && TAB_RENDERERS[name]) TAB_RENDERERS[name]();
     });
   });
@@ -1409,5 +1499,6 @@ window.addEventListener("resize", () => {
 playIntro();
 initTheme();
 initTrendToggle();
+initForecastExpand();
 initTabs();
 loadAll(false);
