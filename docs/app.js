@@ -348,12 +348,72 @@ function pressureTrend(hourly, idx) {
   return { dir: "steady", delta };
 }
 
-function statCard(label, valueHTML, subHTML, areaClass) {
+// Compact 24h trend charts that live inside a stat card, replacing what used to be empty
+// vertical space with the actual shape of the last day — real information, not filler.
+function sparklineSVG(values, opts = {}) {
+  const w = opts.width || 100, h = opts.height || 28;
+  const color = opts.color || "currentColor";
+  const nums = values.filter((v) => v != null);
+  if (nums.length < 2) return "";
+  const n = values.length;
+  const step = w / (n - 1);
+
+  if (opts.mode === "bars") {
+    const max = Math.max(...nums, 0.1);
+    const barW = Math.max(1.5, step * 0.55);
+    const bars = values.map((v, i) => {
+      const val = v || 0;
+      const bh = Math.max(1.5, (val / max) * h);
+      return `<rect x="${(i * step - barW / 2).toFixed(1)}" y="${(h - bh).toFixed(1)}" width="${barW.toFixed(1)}" height="${bh.toFixed(1)}" rx="1" fill="${color}" opacity="${val > 0 ? 0.85 : 0.18}"/>`;
+    }).join("");
+    return `<svg class="sparkline" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">${bars}</svg>`;
+  }
+
+  const min = Math.min(...nums), max = Math.max(...nums), range = (max - min) || 1;
+  let d = "", lastX = 0, lastY = h / 2;
+  values.forEach((v, i) => {
+    if (v == null) return;
+    const x = i * step, y = h - ((v - min) / range) * h;
+    d += (d ? "L" : "M") + x.toFixed(1) + " " + y.toFixed(1) + " ";
+    lastX = x; lastY = y;
+  });
+  return `<svg class="sparkline" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
+    <path d="${d.trim()}" fill="none" stroke="${color}" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="${lastX.toFixed(1)}" cy="${lastY.toFixed(1)}" r="2.2" fill="${color}"/>
+  </svg>`;
+}
+
+// Shared cold->neutral->hot mapping, reused by the hero glow, the calendar heatmap, the
+// records anomaly, and the forecast table — one scale, applied everywhere heat matters.
+function mixColorArr(c1, c2, f) {
+  return [Math.round(c1[0] + (c2[0] - c1[0]) * f), Math.round(c1[1] + (c2[1] - c1[1]) * f), Math.round(c1[2] + (c2[2] - c1[2]) * f)];
+}
+const HEAT_COLD = [90, 156, 248], HEAT_MID = [150, 152, 165], HEAT_HOT = [235, 87, 87];
+function heatColorArr(t, lo, hi) {
+  if (t == null) return null;
+  const frac = Math.max(0, Math.min(1, (t - lo) / ((hi - lo) || 1)));
+  return frac < 0.5 ? mixColorArr(HEAT_COLD, HEAT_MID, frac / 0.5) : mixColorArr(HEAT_MID, HEAT_HOT, (frac - 0.5) / 0.5);
+}
+function heatColor(t, lo, hi) {
+  const c = heatColorArr(t, lo, hi);
+  return c ? `rgb(${c[0]},${c[1]},${c[2]})` : null;
+}
+function heatColorAlpha(t, lo, hi, alpha) {
+  const c = heatColorArr(t, lo, hi);
+  return c ? `rgba(${c[0]},${c[1]},${c[2]},${alpha})` : null;
+}
+
+function statCard(label, valueHTML, subHTML, areaClass, sparkHTML) {
   const d = el("div", "stat-card" + (areaClass ? " " + areaClass : ""));
   d.appendChild(el("div", "s-label", label));
   const v = el("div", "s-value num");
   v.innerHTML = valueHTML;
   d.appendChild(v);
+  if (sparkHTML) {
+    const sp = el("div", "s-spark");
+    sp.innerHTML = sparkHTML;
+    d.appendChild(sp);
+  }
   if (subHTML) {
     const s = el("div", "s-sub");
     s.innerHTML = subHTML;
@@ -403,6 +463,7 @@ function renderHero() {
 
   const card = $("#hero-card");
   card.className = "hero-card tod-" + tod;
+  card.style.setProperty("--heat-glow-color", heatColorAlpha(current.temperature_2m, 15, 38, 0.7));
   $("#hero-icon").innerHTML = weatherIconSVG(current.weather_code, current.is_day);
   $("#hero-temp").textContent = fmt(current.temperature_2m, 1);
   $("#hero-temp").style.setProperty("--temp-weight", tempToWeight(current.temperature_2m));
@@ -418,6 +479,10 @@ function renderHero() {
   applyNowAccent();
 }
 
+function last24hSeries(hourly, idx, key) {
+  return hourly[key].slice(Math.max(0, idx - 23), idx + 1);
+}
+
 function renderNowStats() {
   const { current, hourly, daily } = state.forecast;
   const idx = state.nowHourlyIdx;
@@ -425,31 +490,39 @@ function renderNowStats() {
   const grid = $("#now-stats");
   grid.innerHTML = "";
 
-  grid.appendChild(statCard("Dew Point", `${fmt(current.dew_point_2m, 1)}<span class="unit">°C</span>`, "Condensation threshold", "area-dew"));
+  const dewColor = heatColor(current.dew_point_2m, 10, 26);
+  grid.appendChild(statCard("Dew Point", `<span style="color:${dewColor}">${fmt(current.dew_point_2m, 1)}</span><span class="unit">°C</span>`,
+    "Condensation threshold", "area-dew",
+    sparklineSVG(last24hSeries(hourly, idx, "dew_point_2m"), { color: dewColor })));
 
   const r24hum = last24hRange(hourly, idx, "relative_humidity_2m");
   grid.appendChild(statCard("Humidity", `${fmt(current.relative_humidity_2m, 0)}<span class="unit">%</span>`,
-    r24hum ? `24H range ${fmt(r24hum.min, 0)}–${fmt(r24hum.max, 0)}%` : "", "area-humid"));
+    r24hum ? `24H range ${fmt(r24hum.min, 0)}–${fmt(r24hum.max, 0)}%` : "", "area-humid",
+    sparklineSVG(last24hSeries(hourly, idx, "relative_humidity_2m"), { color: "var(--tab-accent, var(--accent))" })));
 
   const pt = pressureTrend(hourly, idx);
   const arrowGlyph = pt.dir === "rising" ? "▲" : pt.dir === "falling" ? "▼" : "→";
   const arrowClass = pt.dir === "rising" ? "up" : pt.dir === "falling" ? "down" : "";
   grid.appendChild(statCard("Pressure", `${fmt(current.pressure_msl, 1)}<span class="unit">hPa</span><span class="arrow ${arrowClass}">${arrowGlyph}</span>`,
-    `3h trend: <span class="accent">${pt.dir}</span> ${fmt(Math.abs(pt.delta), 1)} hPa`, "area-pressure"));
+    `3h trend: <span class="accent">${pt.dir}</span> ${fmt(Math.abs(pt.delta), 1)} hPa`, "area-pressure",
+    sparklineSVG(last24hSeries(hourly, idx, "pressure_msl"), { color: "var(--tab-accent, var(--accent))" })));
 
   const windArrow = `<svg class="vec" width="14" height="14" viewBox="0 0 12 12" style="transform:rotate(${current.wind_direction_10m}deg)"><path d="M6 1 L9 8 L6 6 L3 8 Z" fill="currentColor"/></svg>`;
   grid.appendChild(statCard("Wind", `${fmt(current.wind_speed_10m, 1)}<span class="unit">km/h</span>${windArrow}`,
-    `From ${fmt(current.wind_direction_10m, 0)}° ${degToCompass(current.wind_direction_10m)} · gusts ${fmt(current.wind_gusts_10m, 1)} km/h`, "area-wind"));
+    `From ${fmt(current.wind_direction_10m, 0)}° ${degToCompass(current.wind_direction_10m)} · gusts ${fmt(current.wind_gusts_10m, 1)} km/h`, "area-wind",
+    sparklineSVG(last24hSeries(hourly, idx, "wind_speed_10m"), { color: "var(--tab-accent, var(--accent))", width: 220 })));
 
   const vis = hourly.visibility[idx];
   grid.appendChild(statCard("Visibility", vis != null ? `${fmt(vis / 1000, 1)}<span class="unit">km</span>` : "—", "Cloud cover " + fmt(current.cloud_cover, 0) + "%", "area-vis"));
 
-  grid.appendChild(statCard("UV Index", `${fmt(current.uv_index, 1)}`, `<span class="accent">${uvBand(current.uv_index)}</span>`, "area-uv"));
+  grid.appendChild(statCard("UV Index", `${fmt(current.uv_index, 1)}`, `<span class="accent">${uvBand(current.uv_index)}</span>`, "area-uv",
+    sparklineSVG(last24hSeries(hourly, idx, "uv_index"), { color: "var(--tab-accent, var(--accent))" })));
 
   const todayPrecip = daily.precipitation_sum[todayIdx];
   const rainProb = hourly.precipitation_probability[idx];
   grid.appendChild(statCard("Precipitation", `${fmt(current.precipitation, 1)}<span class="unit">mm/hr</span>`,
-    `${fmt(rainProb, 0)}% chance next hour · ${fmt(todayPrecip, 1)}mm today`, "area-precip"));
+    `${fmt(rainProb, 0)}% chance next hour · ${fmt(todayPrecip, 1)}mm today`, "area-precip",
+    sparklineSVG(last24hSeries(hourly, idx, "precipitation"), { mode: "bars", color: "var(--tab-accent, var(--accent))" })));
 }
 
 function renderSunCard() {
@@ -839,12 +912,17 @@ function renderForecastTable() {
   const idx = state.nowHourlyIdx;
   const tbody = $("#forecast-tbody");
   tbody.innerHTML = "";
+  const windowTemps = hourly.temperature_2m.slice(idx, idx + 48).filter((v) => v != null);
+  const tMin = windowTemps.length ? Math.min(...windowTemps) : 15, tMax = windowTemps.length ? Math.max(...windowTemps) : 38;
   for (let i = idx; i < Math.min(idx + 48, hourly.time.length); i++) {
     const d = new Date(hourly.time[i]);
     const tr = el("tr", i === idx ? "now-row" : "");
     tr.appendChild(el("th", null, `${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][d.getDay()]} ${pad2(d.getHours())}:00`));
     tr.lastChild.setAttribute("scope", "row");
-    tr.appendChild(el("td", "num", fmt(hourly.temperature_2m[i], 1)));
+    const tempCell = el("td", "num", fmt(hourly.temperature_2m[i], 1));
+    tempCell.style.background = heatColorAlpha(hourly.temperature_2m[i], tMin, tMax, 0.22);
+    tempCell.style.boxShadow = `inset 3px 0 0 ${heatColor(hourly.temperature_2m[i], tMin, tMax)}`;
+    tr.appendChild(tempCell);
     tr.appendChild(el("td", "num", fmt(hourly.apparent_temperature[i], 1)));
     tr.appendChild(el("td", "num", fmt(hourly.precipitation_probability[i], 0)));
     tr.appendChild(el("td", "num", fmt(hourly.precipitation[i], 1)));
@@ -898,12 +976,14 @@ function renderRecords() {
     const recLow = Math.min(...lows);
     const recLowYear = matches.find(([, v]) => v.tmin === recLow)[0].slice(0, 4);
     [
-      ["Record high, this date", `${fmt(recHigh, 1)}°C (${recHighYear})`],
-      ["Record low, this date", `${fmt(recLow, 1)}°C (${recLowYear})`],
-    ].forEach(([k, v]) => {
+      ["Record high, this date", `${fmt(recHigh, 1)}°C (${recHighYear})`, heatColor(recHigh, 15, 38)],
+      ["Record low, this date", `${fmt(recLow, 1)}°C (${recLowYear})`, heatColor(recLow, 15, 38)],
+    ].forEach(([k, v, color]) => {
       const row = el("div", "stat-row");
       row.appendChild(el("span", "k", k));
-      row.appendChild(el("span", "v num", v));
+      const val = el("span", "v num", v);
+      val.style.color = color;
+      row.appendChild(val);
       box.appendChild(row);
     });
 
@@ -912,7 +992,7 @@ function renderRecords() {
     const row = el("div", "stat-row");
     row.appendChild(el("span", "k", `Anomaly vs ${HIST_YEARS}y seasonal norm`));
     const v = el("span", "v num");
-    v.innerHTML = `<span class="${anomaly >= 0 ? "delta-up" : "delta-down"}">${anomaly >= 0 ? "+" : ""}${fmt(anomaly, 1)}°C</span>`;
+    v.innerHTML = `<span class="${anomaly >= 0 ? "heat-hot" : "heat-cold"}">${anomaly >= 0 ? "+" : ""}${fmt(anomaly, 1)}°C</span>`;
     row.appendChild(v);
     box.appendChild(row);
   }
@@ -1034,12 +1114,7 @@ function renderCalendar() {
     if (v && v.tmean != null) monthVals.push(v.tmean);
   }
   const vMin = monthVals.length ? Math.min(...monthVals) : 20, vMax = monthVals.length ? Math.max(...monthVals) : 30;
-
-  function colorFor(t) {
-    const frac = Math.max(0, Math.min(1, (t - vMin) / ((vMax - vMin) || 1)));
-    const l = 88 - frac * 55;
-    return `hsl(222, 70%, ${l}%)`;
-  }
+  const colorFor = (t) => heatColor(t, vMin, vMax);
 
   const grid = el("div", "cal-grid");
   ["S", "M", "T", "W", "T", "F", "S"].forEach((d) => grid.appendChild(el("div", "cal-cell empty", d)));
