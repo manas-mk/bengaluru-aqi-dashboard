@@ -751,6 +751,7 @@ function drawLineChart(root, opts) {
     svg.appendChild(nl);
   }
 
+  const pendingLabels = [];
   series.forEach((s) => {
     const pts = s.data.filter((p) => p.y != null);
     if (!pts.length) return;
@@ -761,14 +762,24 @@ function drawLineChart(root, opts) {
     svg.appendChild(path);
     if (s.directLabel) {
       const last = pts[pts.length - 1];
-      const t = document.createElementNS(svgNS, "text");
-      t.setAttribute("x", Math.min(sx(last.x.getTime()) + 5, width - mR - 2));
-      t.setAttribute("y", sy(last.y) + 3);
-      t.setAttribute("class", "direct-label");
-      t.setAttribute("fill", "var(--ink)");
-      t.textContent = s.label;
-      svg.appendChild(t);
+      pendingLabels.push({ x: Math.min(sx(last.x.getTime()) + 5, width - mR - 2), y: sy(last.y), text: s.label });
     }
+  });
+  // Declutter: when two series end close together (e.g. today/yesterday converging), their
+  // direct labels would otherwise overlap into unreadable text. Nudge them apart vertically,
+  // top to bottom, preserving relative order.
+  pendingLabels.sort((a, b) => a.y - b.y);
+  for (let i = 1; i < pendingLabels.length; i++) {
+    const minY = pendingLabels[i - 1].y + 11;
+    if (pendingLabels[i].y < minY) pendingLabels[i].y = minY;
+  }
+  pendingLabels.forEach((lbl) => {
+    const t = document.createElementNS(svgNS, "text");
+    t.setAttribute("x", lbl.x); t.setAttribute("y", lbl.y + 3);
+    t.setAttribute("class", "direct-label");
+    t.setAttribute("fill", "var(--ink)");
+    t.textContent = lbl.text;
+    svg.appendChild(t);
   });
 
   const crosshair = document.createElementNS(svgNS, "line");
@@ -1235,32 +1246,53 @@ function renderWindRose() {
   }
   const total = dirs.filter((d) => d != null).length || 1;
 
-  const size = 220, cx = size / 2, cy = size / 2, maxR = size / 2 - 24;
+  const size = 220, cx = size / 2, cy = size / 2, maxR = size / 2 - 26;
   const maxCount = Math.max(...data.map((b) => b.reduce((a, c) => a + c, 0)), 1);
 
+  // Rendered as a dark radar/HUD screen (fixed palette, independent of light/dark theme —
+  // like an instrument gauge) since the old approach reused generic chart grid-line colors
+  // that were nearly invisible against the card background.
   const svg = document.createElementNS(svgNS, "svg");
   svg.setAttribute("viewBox", `0 0 ${size} ${size}`);
   svg.setAttribute("width", size); svg.setAttribute("height", size);
   svg.setAttribute("role", "img");
   svg.setAttribute("aria-label", "Wind rose, last 7 days");
+  svg.setAttribute("class", "radar-svg");
+  svg.innerHTML = `<defs><radialGradient id="radarBg" cx="50%" cy="50%" r="65%">
+    <stop offset="0%" stop-color="#0d1c38"/><stop offset="100%" stop-color="#040a16"/>
+  </radialGradient></defs>
+  <circle cx="${cx}" cy="${cy}" r="${maxR + 18}" fill="url(#radarBg)" stroke="rgba(125,211,252,.4)" stroke-width="1"/>`;
 
+  for (let i = 0; i < 8; i++) {
+    const angle = (i * 45 - 90) * Math.PI / 180;
+    const line = document.createElementNS(svgNS, "line");
+    line.setAttribute("x1", cx); line.setAttribute("y1", cy);
+    line.setAttribute("x2", cx + Math.cos(angle) * (maxR + 14)); line.setAttribute("y2", cy + Math.sin(angle) * (maxR + 14));
+    line.setAttribute("class", "radar-spoke");
+    svg.appendChild(line);
+  }
   [0.25, 0.5, 0.75, 1].forEach((f) => {
     const c = document.createElementNS(svgNS, "circle");
     c.setAttribute("cx", cx); c.setAttribute("cy", cy); c.setAttribute("r", maxR * f);
-    c.setAttribute("fill", "none"); c.setAttribute("class", "grid-line");
+    c.setAttribute("fill", "none"); c.setAttribute("class", "radar-ring");
     svg.appendChild(c);
   });
+  const sweepR = maxR + 14, sweepAngle = 42 * Math.PI / 180;
+  const sweep = document.createElementNS(svgNS, "path");
+  sweep.setAttribute("d", `M ${cx} ${cy} L ${cx} ${cy - sweepR} A ${sweepR} ${sweepR} 0 0 1 ${(cx + sweepR * Math.sin(sweepAngle)).toFixed(1)} ${(cy - sweepR * Math.cos(sweepAngle)).toFixed(1)} Z`);
+  sweep.setAttribute("class", "radar-sweep");
+  svg.appendChild(sweep);
   ["N", "E", "S", "W"].forEach((label, i) => {
     const angle = (i * 90 - 90) * Math.PI / 180;
     const t = document.createElementNS(svgNS, "text");
-    t.setAttribute("x", cx + Math.cos(angle) * (maxR + 12));
-    t.setAttribute("y", cy + Math.sin(angle) * (maxR + 12) + 3);
-    t.setAttribute("class", "axis-lbl"); t.setAttribute("text-anchor", "middle");
+    t.setAttribute("x", cx + Math.cos(angle) * (maxR + 13));
+    t.setAttribute("y", cy + Math.sin(angle) * (maxR + 13) + 4);
+    t.setAttribute("class", "radar-compass"); t.setAttribute("text-anchor", "middle");
     t.textContent = label;
     svg.appendChild(t);
   });
 
-  const blues = [cssVar("--wind-1"), cssVar("--wind-2"), cssVar("--wind-3"), cssVar("--wind-4")];
+  const blues = ["#7dd3fc", "#38bdf8", "#0ea5e9", "#4f46e5"];
   for (let b = 0; b < buckets; b++) {
     let acc = 0;
     const angleStart = (b * (360 / buckets) - 90 - (360 / buckets) / 2) * Math.PI / 180;
@@ -1278,7 +1310,7 @@ function renderWindRose() {
       const p4 = [cx + Math.cos(angleEnd) * r0, cy + Math.sin(angleEnd) * r0];
       path.setAttribute("d", `M ${p1[0]} ${p1[1]} L ${p2[0]} ${p2[1]} L ${p3[0]} ${p3[1]} L ${p4[0]} ${p4[1]} Z`);
       path.setAttribute("fill", blues[s]);
-      path.setAttribute("stroke", "var(--panel)");
+      path.setAttribute("stroke", "#040a16");
       path.setAttribute("stroke-width", "1");
       path.setAttribute("class", "rose-petal");
       path.style.transitionDelay = (b * 0.025) + "s";
