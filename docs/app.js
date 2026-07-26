@@ -462,7 +462,7 @@ function renderHero() {
   const tod = timeOfDay(new Date(current.time), sunrise, sunset);
 
   const card = $("#hero-card");
-  card.className = "hero-card tod-" + tod;
+  card.className = "hero-card area-hero tod-" + tod;
   card.style.setProperty("--heat-glow-color", heatColorAlpha(current.temperature_2m, 15, 38, 0.7));
   $("#hero-icon").innerHTML = weatherIconSVG(current.weather_code, current.is_day);
   $("#hero-temp").textContent = fmt(current.temperature_2m, 1);
