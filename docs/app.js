@@ -181,12 +181,6 @@ async function fetchHistorical() {
   return data;
 }
 
-// Daily-logged, cross-visitor forecast-verification history — see scripts/log_forecast.mjs
-// and .github/workflows/forecast-log.yml. Same-origin static file, not a live API.
-async function fetchForecastLog() {
-  return fetchJSON("data/forecast_log.json?t=" + Date.now());
-}
-
 /* ============================== DERIVED DAILY MAP ============================== */
 // Build date -> {tmax,tmin,tmean,precip} from hourly forecast data (covers the archive-to-now lag).
 function dailyFromHourly(hourly) {
@@ -226,7 +220,7 @@ function mergeDailyMaps(archiveDaily, hourlyDerived) {
 }
 
 /* ============================== APP STATE ============================== */
-const state = { forecast: null, aq: null, historicalDaily: null, forecastLog: null, lastLoad: null, nowHourlyIdx: null };
+const state = { forecast: null, aq: null, historicalDaily: null, lastLoad: null, nowHourlyIdx: null };
 
 /* ============================== WEATHER ICONS ============================== */
 // Hand-drawn SVG icons (no emoji, no icon font) so sizing/color are fully controlled and
@@ -733,15 +727,6 @@ function drawLineChart(root, opts) {
     svg.appendChild(lbl);
   }
 
-  if (opts.zeroLine && yMin < 0 && yMax > 0) {
-    const zy = sy(0);
-    const zl = document.createElementNS(svgNS, "line");
-    zl.setAttribute("x1", mL); zl.setAttribute("x2", width - mR);
-    zl.setAttribute("y1", zy); zl.setAttribute("y2", zy);
-    zl.setAttribute("class", "zero-line");
-    svg.appendChild(zl);
-  }
-
   if (nowX != null) {
     const x = sx(nowX.getTime());
     const nl = document.createElementNS(svgNS, "line");
@@ -1207,79 +1192,6 @@ function renderCalendar() {
   box.appendChild(legend);
 }
 
-/* ============================== FORECAST VERIFICATION ============================== */
-// Scores Open-Meteo's own prior-day forecast against its own next-day data, logged once daily
-// by scripts/log_forecast.mjs (see .github/workflows/forecast-log.yml). This is a measure of
-// forecast self-consistency/drift, not verification against an independent ground station —
-// stated plainly in the panel, consistent with how every other panel labels its data source.
-function mean(arr) { return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null; }
-
-function renderForecastVerification() {
-  const box = $("#forecast-verify-box");
-  box.innerHTML = "";
-  const log = state.forecastLog;
-  if (!log || !log.records) {
-    box.appendChild(el("p", "panel-error", "Forecast verification log unavailable — retrying next refresh."));
-    return;
-  }
-  const leadHours = log.lead_hours || [24, 48, 72];
-  const verified = log.records.filter((r) => r.actual);
-  if (verified.length < 3) {
-    box.appendChild(el("p", "panel-note",
-      `Verification history is building — a new day is scored automatically each night. ` +
-      `${verified.length} day${verified.length === 1 ? "" : "s"} scored so far; check back once there are a few more.`));
-    return;
-  }
-
-  const note = el("p", "panel-note",
-    "Compares each day's forecast (logged when it was made) against Open-Meteo's own data for that date once it arrived — " +
-    "a measure of the model's self-consistency and drift for Bengaluru, not a check against an independent ground station.");
-  box.appendChild(note);
-
-  const grid = el("div", "grid-3", null);
-  grid.style.marginTop = "16px";
-  leadHours.forEach((lead) => {
-    const key = `${lead}h`;
-    const errs = verified.map((r) => r.errors && r.errors[key] && r.errors[key].tmax).filter((v) => v != null);
-    const box2 = el("div", "box");
-    box2.appendChild(el("h3", null, `${lead}H LEAD — HIGH TEMP`));
-    if (!errs.length) {
-      box2.appendChild(el("p", "chart-empty", "No scored days yet."));
-    } else {
-      const mae = mean(errs.map((v) => Math.abs(v)));
-      const bias = mean(errs);
-      const dir = bias > 0.15 ? "runs cool" : bias < -0.15 ? "runs warm" : "neutral";
-      const item = el("div", "comfort-item");
-      item.appendChild(el("div", "cv num", `±${fmt(mae, 1)}°C`));
-      item.appendChild(el("div", "cf", `MAE, mean absolute error over ${errs.length} scored days`));
-      const biasRow = el("div", "cf");
-      biasRow.style.marginTop = "6px";
-      biasRow.innerHTML = `Bias: <span class="${bias > 0 ? "delta-up" : bias < 0 ? "delta-down" : ""}">${bias >= 0 ? "+" : ""}${fmt(bias, 1)}°C</span> (<span class="accent">${dir}</span>)`;
-      item.appendChild(biasRow);
-      box2.appendChild(item);
-    }
-    grid.appendChild(box2);
-  });
-  box.appendChild(grid);
-
-  const primaryLead = leadHours[0];
-  const chartSeries = verified
-    .map((r) => ({ x: new Date(r.target_date), y: r.errors && r.errors[`${primaryLead}h`] ? r.errors[`${primaryLead}h`].tmax : null }))
-    .filter((p) => p.y != null);
-  const chartWrap = el("div", "chart-wrap");
-  chartWrap.style.marginTop = "18px";
-  box.appendChild(el("h3", "eyebrow-sm", `Daily error, ${primaryLead}h-lead high-temp forecast (actual − predicted)`));
-  box.appendChild(chartWrap);
-  drawLineChart(chartWrap, {
-    ariaLabel: `Daily forecast error, ${primaryLead} hour lead time`,
-    height: 160,
-    xTickFmt: (d) => (d.getMonth() + 1) + "/" + d.getDate(),
-    yUnit: "°C",
-    zeroLine: true,
-    series: [{ data: chartSeries, className: "series-a", label: "Error °C" }],
-  });
-}
-
 /* ============================== WIND ROSE ============================== */
 function renderWindRose() {
   const box = $("#windrose-box");
@@ -1479,12 +1391,11 @@ async function loadAll(isRefresh) {
     $("#aqi-detail-box").innerHTML = '<div class="skel skel-line"></div><div class="skel skel-line"></div><div class="skel skel-line"></div>';
     $("#chart-aqi-forecast").innerHTML = '<div class="skel skel-block"></div>';
     $("#comfort-grid").innerHTML = Array(3).fill('<div class="box"><div class="skel skel-line" style="height:30px"></div></div>').join("");
-    $("#forecast-verify-box").innerHTML = '<div class="skel skel-line"></div><div class="skel skel-block"></div>';
   }
   setStatus("Refreshing…");
 
-  const results = await Promise.allSettled([fetchForecast(), fetchAirQuality(), fetchHistorical(), fetchForecastLog()]);
-  const [fRes, aqRes, histRes, logRes] = results;
+  const results = await Promise.allSettled([fetchForecast(), fetchAirQuality(), fetchHistorical()]);
+  const [fRes, aqRes, histRes] = results;
 
   if (fRes.status === "fulfilled") {
     state.forecast = fRes.value;
@@ -1512,9 +1423,6 @@ async function loadAll(isRefresh) {
     console.warn("Historical fetch failed", histRes.reason);
     scheduleFeedRetry("hist");
   }
-
-  state.forecastLog = logRes.status === "fulfilled" ? logRes.value : null;
-  if (logRes.status !== "fulfilled") console.warn("Forecast log fetch failed", logRes.reason);
 
   render(isRefresh);
   state.lastLoad = Date.now();
@@ -1601,7 +1509,6 @@ function renderTrendsTab() {
   renderRecords();
   renderRainfall();
   renderCalendar();
-  renderForecastVerification();
 }
 function renderWindTab() {
   renderWindRose();
