@@ -570,14 +570,26 @@ table.instrument tbody tr.now-row td:first-child, table.instrument tbody tr.now-
 .cal-legend .sw { width: 14px; height: 14px; display: inline-block; border-radius: 4px; }
 .cal-legend-note { margin-left: 10px; font-style: normal; }
 
-/* ---------- Location map (Trends & Records tab) ---------- */
+/* ---------- Weather map (Now tab): minimal basemap + live radar overlay ---------- */
 .map-embed {
   border: 1px solid var(--glass-border); border-radius: var(--radius-sm); overflow: hidden;
-  filter: grayscale(.15) contrast(1.02);
+  height: 260px; background: var(--bg);
 }
-.map-embed iframe { display: block; }
+.leaflet-container { font-family: var(--sans); background: var(--bg); }
+.leaflet-control-zoom a {
+  background: var(--glass-bg) !important; color: var(--ink) !important; border-color: var(--glass-border) !important;
+}
+.leaflet-control-zoom { border: none !important; box-shadow: var(--shadow-card) !important; }
+.leaflet-control-attribution {
+  background: var(--glass-bg) !important; color: var(--ink-3) !important; font-size: 9.5px !important;
+}
+.leaflet-control-attribution a { color: var(--ink-2) !important; }
+.map-marker-dot {
+  display: block; width: 14px; height: 14px; border-radius: 50%; border: 2px solid #fff;
+  background: var(--tab-accent, var(--accent));
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--tab-accent, var(--accent)) 30%, transparent), 0 0 10px var(--tab-accent, var(--accent));
+}
 #location-note { margin-top: 10px; }
-#location-note a { color: var(--tab-accent, var(--accent)); }
 
 /* ---------- Wind rose (neo-futurist radar/HUD) ---------- */
 .windrose-wrap { display: flex; gap: 24px; align-items: center; flex-wrap: wrap; }

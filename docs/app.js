@@ -1529,7 +1529,59 @@ function renderLocationCard() {
   if (!note || !state.forecast) return;
   const elevation = state.forecast.elevation;
   const elevationTxt = elevation != null ? ` · ${Math.round(elevation)}m elevation` : "";
-  note.firstChild.textContent = `12.9716°N, 77.5946°E${elevationTxt} — every reading on this page describes this single point.`;
+  note.textContent = `12.9716°N, 77.5946°E${elevationTxt} — every reading on this page describes this single point.`;
+}
+
+/* ============================== WEATHER MAP ============================== */
+// A minimal basemap (CartoDB, no labels — the standard OSM mapnik style was too busy for
+// what's meant to be a quiet instrument) with a live RainViewer precipitation radar overlay.
+// Both are free, keyless public tile services, consistent with the rest of the site.
+let weatherMap = null, weatherMapBasemap = null;
+
+function weatherMapBasemapUrl() {
+  return isDarkTheme()
+    ? "https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png"
+    : "https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png";
+}
+
+function initWeatherMap() {
+  const el = document.getElementById("weather-map");
+  if (!el || typeof L === "undefined" || weatherMap) return;
+
+  weatherMap = L.map(el, {
+    center: [LAT, LON], zoom: 9, scrollWheelZoom: false, attributionControl: true,
+  });
+
+  weatherMapBasemap = L.tileLayer(weatherMapBasemapUrl(), {
+    subdomains: "abcd", maxZoom: 18,
+    attribution: '&copy; <a href="https://carto.com/attributions">CARTO</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+  }).addTo(weatherMap);
+
+  const markerIcon = L.divIcon({ className: "map-marker", html: '<span class="map-marker-dot"></span>', iconSize: [14, 14], iconAnchor: [7, 7] });
+  L.marker([LAT, LON], { icon: markerIcon, interactive: false }).addTo(weatherMap);
+
+  fetch("https://api.rainviewer.com/public/weather-maps.json")
+    .then((r) => r.json())
+    .then((data) => {
+      const frames = data.radar && data.radar.past;
+      if (!frames || !frames.length) return;
+      const latest = frames[frames.length - 1];
+      L.tileLayer(`${data.host}${latest.path}/256/{z}/{x}/{y}/2/1_1.png`, {
+        opacity: 0.55, maxNativeZoom: 7,
+        attribution: 'Radar: <a href="https://www.rainviewer.com/api.html">RainViewer</a>',
+      }).addTo(weatherMap);
+      const radarTimeEl = $("#radar-time");
+      if (radarTimeEl) {
+        const t = new Date(latest.time * 1000);
+        radarTimeEl.textContent = `Radar as of ${t.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`;
+      }
+    })
+    .catch((e) => console.warn("RainViewer fetch failed", e));
+}
+
+function applyWeatherMapTheme() {
+  if (!weatherMap || !weatherMapBasemap) return;
+  weatherMapBasemap.setUrl(weatherMapBasemapUrl());
 }
 
 function renderNowTab() {
@@ -1587,6 +1639,7 @@ function initTheme() {
     document.documentElement.setAttribute("data-theme", next);
     localStorage.setItem("theme", next);
     label();
+    applyWeatherMapTheme();
     if (state.forecast) render(true);
   });
 }
@@ -1679,6 +1732,7 @@ let resizeDebounce = null;
 window.addEventListener("resize", () => {
   clearTimeout(resizeDebounce);
   resizeDebounce = setTimeout(() => {
+    if (weatherMap) weatherMap.invalidateSize();
     if (!state.forecast) return;
     const active = document.body.dataset.tab || "now";
     if (TAB_RENDERERS[active]) TAB_RENDERERS[active]();
@@ -1690,5 +1744,6 @@ initTheme();
 initTrendToggle();
 initForecastExpand();
 initHeroTilt();
+initWeatherMap();
 initTabs();
 loadAll(false);
