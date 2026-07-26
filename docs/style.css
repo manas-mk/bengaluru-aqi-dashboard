@@ -29,7 +29,7 @@
   --blob-1: #2a78d6;
   --blob-2: #7a63e8;
   --blob-3: #e8783f;
-  --blob-opacity: .38;
+  --blob-opacity: .46;
 }
 
 :root[data-theme="dark"] {
@@ -52,7 +52,7 @@
   --blob-1: #6ea1ff;
   --blob-2: #9c8bf0;
   --blob-3: #ff9459;
-  --blob-opacity: .32;
+  --blob-opacity: .4;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -80,7 +80,7 @@
     --blob-1: #6ea1ff;
     --blob-2: #9c8bf0;
     --blob-3: #ff9459;
-    --blob-opacity: .32;
+    --blob-opacity: .4;
   }
 }
 
@@ -529,8 +529,8 @@ table.instrument tbody tr.now-row td:first-child, table.instrument tbody tr.now-
 .stat-row .v .delta-down { color: var(--bad); }
 .delta-up { color: var(--tab-accent, var(--accent)); font-weight: 700; }
 .delta-down { color: var(--bad); font-weight: 700; }
-.heat-hot { color: rgb(235,87,87); font-weight: 700; }
-.heat-cold { color: rgb(90,156,248); font-weight: 700; }
+.heat-hot { color: rgb(235,64,64); font-weight: 700; }
+.heat-cold { color: rgb(56,132,240); font-weight: 700; }
 .percentile-bar { height: 8px; background: var(--rule); position: relative; margin-top: 10px; border-radius: 999px; overflow: hidden; }
 .percentile-bar .fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--tab-accent, var(--accent)); border-radius: 999px; }
 .percentile-bar .marker { position: absolute; top: -3px; width: 2px; height: 14px; background: var(--ink); }
@@ -546,8 +546,16 @@ table.instrument tbody tr.now-row td:first-child, table.instrument tbody tr.now-
 .cal-cell { aspect-ratio: 1; display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: 10.5px; position: relative; border-radius: 6px; }
 .cal-cell.empty { border: none; }
 .cal-cell.today { box-shadow: inset 0 0 0 2px var(--tab-accent, var(--accent)); }
-.cal-legend { display: flex; align-items: center; gap: 6px; margin-top: 12px; font-size: 10px; color: var(--ink-3); }
+.cal-cell.forecast { box-shadow: inset 0 0 0 1.5px rgba(255,255,255,.4); opacity: .8; }
+.cal-cell.forecast::after {
+  content: ""; position: absolute; inset: 0; border-radius: 6px;
+  background-image: repeating-linear-gradient(135deg, rgba(255,255,255,.12) 0 4px, transparent 4px 8px);
+  pointer-events: none;
+}
+.cal-cell.placeholder { border: 1px dashed var(--rule-strong); color: var(--ink-3); }
+.cal-legend { display: flex; align-items: center; gap: 6px; margin-top: 12px; font-size: 10px; color: var(--ink-3); flex-wrap: wrap; }
 .cal-legend .sw { width: 14px; height: 14px; display: inline-block; border-radius: 4px; }
+.cal-legend-note { margin-left: 10px; font-style: normal; }
 
 /* ---------- Wind rose (neo-futurist radar/HUD) ---------- */
 .windrose-wrap { display: flex; gap: 24px; align-items: center; flex-wrap: wrap; }

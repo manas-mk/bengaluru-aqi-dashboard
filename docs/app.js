@@ -153,7 +153,7 @@ function percentileRank(value, arr) {
 /* ============================== DATA FETCH ============================== */
 async function fetchForecast() {
   const url = `${FORECAST_URL}?latitude=${LAT}&longitude=${LON}&timezone=${encodeURIComponent(TZ)}` +
-    `&past_days=30&forecast_days=3` +
+    `&past_days=30&forecast_days=7` +
     `&current=temperature_2m,relative_humidity_2m,apparent_temperature,dew_point_2m,pressure_msl,wind_speed_10m,wind_gusts_10m,wind_direction_10m,cloud_cover,uv_index,precipitation,weather_code,is_day` +
     `&hourly=temperature_2m,apparent_temperature,dew_point_2m,relative_humidity_2m,pressure_msl,wind_speed_10m,wind_gusts_10m,wind_direction_10m,cloud_cover,uv_index,precipitation,precipitation_probability,visibility,weather_code` +
     `&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,sunrise,sunset,uv_index_max,wind_speed_10m_max,wind_direction_10m_dominant,weather_code`;
@@ -388,7 +388,7 @@ function sparklineSVG(values, opts = {}) {
 function mixColorArr(c1, c2, f) {
   return [Math.round(c1[0] + (c2[0] - c1[0]) * f), Math.round(c1[1] + (c2[1] - c1[1]) * f), Math.round(c1[2] + (c2[2] - c1[2]) * f)];
 }
-const HEAT_COLD = [90, 156, 248], HEAT_MID = [150, 152, 165], HEAT_HOT = [235, 87, 87];
+const HEAT_COLD = [56, 132, 240], HEAT_MID = [255, 205, 110], HEAT_HOT = [235, 64, 64];
 function heatColorArr(t, lo, hi) {
   if (t == null) return null;
   const frac = Math.max(0, Math.min(1, (t - lo) / ((hi - lo) || 1)));
@@ -1100,6 +1100,50 @@ function renderRainfall() {
   note.style.marginTop = "6px";
   box.appendChild(note);
 
+  // Rainy-day count and the current wet/dry streak — genuinely useful context that a
+  // millimeter total alone doesn't convey (10mm across 8 days reads very differently
+  // from 10mm in one downpour).
+  let rainyDaysActual = 0;
+  for (let d = 1; d <= dom; d++) {
+    const v = state.historicalDaily[`${year}-${pad2(month + 1)}-${pad2(d)}`];
+    if (v && v.precip > 0.1) rainyDaysActual++;
+  }
+  let rainyNormalSum = 0, rainyNormalCount = 0;
+  years.forEach((y) => {
+    let count = 0, has = false;
+    for (let d = 1; d <= dom; d++) {
+      const v = state.historicalDaily[`${y}-${pad2(month + 1)}-${pad2(d)}`];
+      if (v) { has = true; if (v.precip > 0.1) count++; }
+    }
+    if (has) { rainyNormalSum += count; rainyNormalCount++; }
+  });
+  const rainyNormal = rainyNormalCount ? rainyNormalSum / rainyNormalCount : null;
+
+  const rainyRow = el("div", "stat-row");
+  rainyRow.style.marginTop = "16px";
+  rainyRow.appendChild(el("span", "k", "Rainy days this month"));
+  const rainyVal = el("span", "v num");
+  rainyVal.innerHTML = `${rainyDaysActual}${rainyNormal != null ? ` <span class="panel-note" style="display:inline">(avg ${fmt(rainyNormal, 1)})</span>` : ""}`;
+  rainyRow.appendChild(rainyVal);
+  box.appendChild(rainyRow);
+
+  const sortedDates = Object.keys(state.historicalDaily).filter((d) => new Date(d) <= now).sort();
+  let streak = 0, streakWet = null;
+  for (let i = sortedDates.length - 1; i >= 0; i--) {
+    const v = state.historicalDaily[sortedDates[i]];
+    if (v.precip == null) break;
+    const isWet = v.precip > 0.1;
+    if (streakWet === null) { streakWet = isWet; streak = 1; }
+    else if (isWet === streakWet) streak++;
+    else break;
+  }
+  if (streak > 0) {
+    const streakRow = el("div", "stat-row");
+    streakRow.appendChild(el("span", "k", "Current streak"));
+    streakRow.appendChild(el("span", "v num", `${streak} day${streak === 1 ? "" : "s"} ${streakWet ? "wet" : "dry"}`));
+    box.appendChild(streakRow);
+  }
+
   if (mtdNormal) {
     const pctVsNormal = Math.round(((mtdActual - mtdNormal) / mtdNormal) * 100);
     const monthName = now.toLocaleDateString(undefined, { month: "long" });
@@ -1127,20 +1171,30 @@ function renderCalendar() {
   const vMin = monthVals.length ? Math.min(...monthVals) : 20, vMax = monthVals.length ? Math.max(...monthVals) : 30;
   const colorFor = (t) => heatColor(t, vMin, vMax);
 
+  const todayNum = now.getDate();
+  let hasForecastCell = false;
   const grid = el("div", "cal-grid");
   ["S", "M", "T", "W", "T", "F", "S"].forEach((d) => grid.appendChild(el("div", "cal-cell empty", d)));
   for (let i = 0; i < firstDow; i++) grid.appendChild(el("div", "cal-cell empty"));
   for (let day = 1; day <= daysInMonth; day++) {
     const iso = `${year}-${pad2(month + 1)}-${pad2(day)}`;
     const v = state.historicalDaily[iso];
-    const cell = el("div", "cal-cell" + (day === now.getDate() ? " today" : ""));
+    const isFuture = day > todayNum;
+    const cell = el("div", "cal-cell" + (day === todayNum ? " today" : ""));
     if (v && v.tmean != null) {
       cell.style.background = colorFor(v.tmean);
-      cell.title = `${iso}: mean ${fmt(v.tmean, 1)}°C`;
       cell.textContent = day;
+      if (isFuture) {
+        cell.classList.add("forecast");
+        cell.title = `${iso}: forecast mean ${fmt(v.tmean, 1)}°C`;
+        hasForecastCell = true;
+      } else {
+        cell.title = `${iso}: mean ${fmt(v.tmean, 1)}°C`;
+      }
     } else {
+      cell.classList.add("placeholder");
       cell.textContent = day;
-      cell.style.color = "var(--ink-3)";
+      cell.title = `${iso}: no data yet`;
     }
     grid.appendChild(cell);
   }
@@ -1148,7 +1202,8 @@ function renderCalendar() {
   const legend = el("div", "cal-legend");
   legend.innerHTML = `<span>${fmt(vMin, 0)}°C</span>` +
     [0, 0.25, 0.5, 0.75, 1].map((f) => `<span class="sw" style="background:${colorFor(vMin + f * (vMax - vMin))}"></span>`).join("") +
-    `<span>${fmt(vMax, 0)}°C</span>`;
+    `<span>${fmt(vMax, 0)}°C</span>` +
+    (hasForecastCell ? `<span class="cal-legend-note">◌ dashed = forecast, not yet observed</span>` : "");
   box.appendChild(legend);
 }
 
