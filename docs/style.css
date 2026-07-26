@@ -567,6 +567,15 @@ table.instrument tbody tr.now-row td:first-child, table.instrument tbody tr.now-
 .cal-legend .sw { width: 14px; height: 14px; display: inline-block; border-radius: 4px; }
 .cal-legend-note { margin-left: 10px; font-style: normal; }
 
+/* ---------- Location map (Trends & Records tab) ---------- */
+.map-embed {
+  border: 1px solid var(--glass-border); border-radius: var(--radius-sm); overflow: hidden;
+  filter: grayscale(.15) contrast(1.02);
+}
+.map-embed iframe { display: block; }
+#location-note { margin-top: 10px; }
+#location-note a { color: var(--tab-accent, var(--accent)); }
+
 /* ---------- Wind rose (neo-futurist radar/HUD) ---------- */
 .windrose-wrap { display: flex; gap: 24px; align-items: center; flex-wrap: wrap; }
 .radar-svg { filter: drop-shadow(0 8px 24px rgba(14,165,233,.25)); }

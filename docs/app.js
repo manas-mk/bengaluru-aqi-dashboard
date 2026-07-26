@@ -1534,10 +1534,19 @@ function renderForecastTab() {
   renderTodayChart();
   renderForecastTable();
 }
+function renderLocationCard() {
+  const note = $("#location-note");
+  if (!note || !state.forecast) return;
+  const elevation = state.forecast.elevation;
+  const elevationTxt = elevation != null ? ` · ${Math.round(elevation)}m elevation` : "";
+  note.firstChild.textContent = `12.9716°N, 77.5946°E${elevationTxt} — every reading on this page describes this single point.`;
+}
+
 function renderTrendsTab() {
   renderTrendGrid();
   renderRecords();
   renderRainfall();
+  renderLocationCard();
   renderCalendar();
   renderForecastVerification();
 }
@@ -1610,6 +1619,15 @@ function initForecastExpand() {
 }
 
 /* ============================== TABS ============================== */
+// The location iframe sits inside a tab panel that's display:none until first opened, and an
+// embedded Leaflet map computes its tile grid from the container's size at load time — a
+// zero-size (hidden) container makes it load a permanently blank grid, even after the tab
+// becomes visible. Deferring the src until the panel is actually shown avoids that entirely.
+function loadLocationMap() {
+  const iframe = $("#location-iframe");
+  if (iframe && !iframe.src && iframe.dataset.src) iframe.src = iframe.dataset.src;
+}
+
 function initTabs() {
   const buttons = document.querySelectorAll(".tab-btn");
   buttons.forEach((btn) => {
@@ -1623,6 +1641,7 @@ function initTabs() {
       });
       document.body.dataset.tab = name;
       applyNowAccent();
+      if (name === "trends") loadLocationMap();
       if (state.forecast && TAB_RENDERERS[name]) TAB_RENDERERS[name]();
     });
   });
