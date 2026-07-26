@@ -1863,3 +1863,11 @@ initHeroTilt();
 initWeatherMap();
 initTabs();
 loadAll(false);
+
+// Offline app-shell support — never intercepts the weather/AQI API calls or map tiles
+// (see sw.js), which already have their own localStorage-based freshness handling.
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  });
+}
