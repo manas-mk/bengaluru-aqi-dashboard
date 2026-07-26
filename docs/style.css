@@ -267,7 +267,8 @@ body {
     "hero hero hero hero"
     "humid pressure dew uv"
     "wind wind vis precip"
-    "sun sun aqi aqi";
+    "sun sun aqi aqi"
+    "location location location location";
 }
 .bento-grid > .hero-card, .bento-grid > .panel-card, #now-stats > .stat-card { margin-bottom: 0; }
 #now-stats { display: contents; }
@@ -281,6 +282,7 @@ body {
 .area-uv { grid-area: uv; }
 .area-vis { grid-area: vis; }
 .area-precip { grid-area: precip; }
+.area-location { grid-area: location; }
 @media (max-width: 860px) {
   .bento-grid {
     grid-template-columns: repeat(2, 1fr);
@@ -291,7 +293,8 @@ body {
       "wind wind"
       "vis precip"
       "sun sun"
-      "aqi aqi";
+      "aqi aqi"
+      "location location";
   }
 }
 
