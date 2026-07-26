@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1200" y2="630" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0A0E17"/>
+      <stop offset="1" stop-color="#161225"/>
+    </linearGradient>
+    <linearGradient id="accentFade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8B8FF0" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#8B8FF0" stop-opacity="0"/>
+    </linearGradient>
+    <style>
+      .mono { font-family: 'JetBrains Mono', 'Consolas', monospace; }
+      .sans { font-family: 'Inter', 'Segoe UI', sans-serif; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect width="1200" height="260" fill="url(#accentFade)"/>
+
+  <circle cx="1030" cy="150" r="130" fill="#8B8FF0" opacity="0.08"/>
+  <circle cx="1030" cy="150" r="80" fill="#8B8FF0" opacity="0.10"/>
+
+  <text x="80" y="140" class="mono" font-size="20" letter-spacing="3" fill="#A7ADC2">BENGALURU</text>
+  <text x="80" y="215" class="sans" font-size="64" font-weight="700" fill="#EDEFF7">Weather Instrument</text>
+  <text x="80" y="262" class="sans" font-size="24" fill="#A7ADC2">Live weather, CPCB air quality, and 10-year climate records</text>
+
+  <g transform="translate(80,330)">
+    <rect width="300" height="150" rx="12" fill="#10141F" stroke="rgba(255,255,255,0.06)"/>
+    <text x="24" y="40" class="mono" font-size="11" letter-spacing="2" fill="#A7ADC2">TEMPERATURE</text>
+    <text x="24" y="108" class="sans" font-size="56" font-weight="600" fill="#EDEFF7">28°</text>
+    <text x="140" y="108" class="sans" font-size="20" fill="#A7ADC2">Partly cloudy</text>
+  </g>
+
+  <g transform="translate(410,330)">
+    <rect width="300" height="150" rx="12" fill="#10141F" stroke="rgba(255,255,255,0.06)"/>
+    <text x="24" y="40" class="mono" font-size="11" letter-spacing="2" fill="#A7ADC2">AIR QUALITY (CPCB)</text>
+    <rect x="24" y="58" width="90" height="32" rx="16" fill="#E8C547"/>
+    <text x="69" y="79" class="sans" font-size="15" font-weight="700" fill="#14161C" text-anchor="middle">Moderate</text>
+    <text x="24" y="122" class="sans" font-size="16" fill="#A7ADC2">Dominant: PM2.5</text>
+  </g>
+
+  <g transform="translate(740,330)">
+    <rect width="380" height="150" rx="12" fill="#10141F" stroke="rgba(255,255,255,0.06)"/>
+    <text x="24" y="40" class="mono" font-size="11" letter-spacing="2" fill="#A7ADC2">NO API KEYS · STATIC SITE</text>
+    <text x="24" y="80" class="sans" font-size="18" fill="#EDEFF7">Open-Meteo forecast + air quality</text>
+    <text x="24" y="108" class="sans" font-size="18" fill="#EDEFF7">Live precipitation radar map</text>
+    <text x="24" y="136" class="sans" font-size="18" fill="#EDEFF7">Auto-refreshes every 15 minutes</text>
+  </g>
+
+  <text x="80" y="560" class="mono" font-size="16" letter-spacing="1" fill="#6E7488">manas-mk.github.io/bengaluru-aqi-dashboard</text>
+</svg>

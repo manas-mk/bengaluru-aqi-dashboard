@@ -5,24 +5,35 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bengaluru — Weather Instrument</title>
 <meta name="description" content="An exhaustive statistical instrument for Bengaluru weather, air quality, and climate: live conditions, forecasts, records, and trends.">
-<meta name="theme-color" content="#0a1428">
+<meta name="theme-color" content="#0A0E17">
+<link rel="canonical" href="https://manas-mk.github.io/bengaluru-aqi-dashboard/">
+
 <meta property="og:type" content="website">
+<meta property="og:url" content="https://manas-mk.github.io/bengaluru-aqi-dashboard/">
 <meta property="og:title" content="Bengaluru — Weather Instrument">
-<meta property="og:description" content="Live Bengaluru weather, air quality, forecasts, and 10-year climate records — no backend, no build step, fully client-side.">
-<meta name="twitter:card" content="summary">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%2316305c'/%3E%3Ccircle cx='50' cy='50' r='20' fill='%236ea1ff'/%3E%3C/svg%3E">
+<meta property="og:description" content="Live Bengaluru weather, CPCB air quality, forecasts, and 10-year climate records — no backend, no build step, fully client-side.">
+<meta property="og:image" content="https://manas-mk.github.io/bengaluru-aqi-dashboard/og-image.svg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Bengaluru — Weather Instrument">
+<meta name="twitter:description" content="Live Bengaluru weather, CPCB air quality, forecasts, and 10-year climate records — no backend, no build step, fully client-side.">
+<meta name="twitter:image" content="https://manas-mk.github.io/bengaluru-aqi-dashboard/og-image.svg">
+
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%230A0E17'/%3E%3Ccircle cx='50' cy='50' r='20' fill='%238B8FF0'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
 <!-- bump the ?v= on style.css/app.js whenever either changes — no build step means no
      content-hashed filenames, so this is what forces a stale-cached browser to refetch -->
-<link rel="stylesheet" href="style.css?v=20260727b">
+<link rel="stylesheet" href="style.css?v=20260727c">
 </head>
 <body>
 
-<div class="bg-decor" aria-hidden="true">
-  <span class="blob blob-1"></span>
-  <span class="blob blob-2"></span>
-  <span class="blob blob-3"></span>
-</div>
+<noscript>
+  <div class="noscript-banner" role="alert">
+    This dashboard fetches live weather and air quality data client-side and needs JavaScript enabled to display anything. Please enable JavaScript and reload the page.
+  </div>
+</noscript>
 
 <div id="intro" class="intro" aria-hidden="true">
   <div class="intro-orbit"><div class="intro-dot"></div><div class="intro-ring"></div></div>
@@ -34,40 +45,42 @@
 
   <div class="topbar">
     <div class="brand">
-      <span class="city">Bengaluru</span>
-      <span class="sub">Weather Instrument</span>
+      <h1><span class="city">Bengaluru</span><span class="sub">Weather Instrument</span></h1>
     </div>
     <div class="status">
-      <span id="refresh-status"><span class="dot" id="status-dot"></span><span id="status-text">Loading…</span></span>
-      <button class="theme-btn" id="theme-toggle" aria-label="Toggle dark mode">DARK</button>
+      <span id="stale-badge" class="stale-badge" hidden aria-live="polite"></span>
+      <span id="refresh-status" aria-live="polite"><span class="dot" id="status-dot"></span><span id="status-text">Loading…</span></span>
+      <button class="theme-btn" id="theme-toggle" aria-label="Toggle dark mode" aria-pressed="false" type="button">DARK</button>
     </div>
   </div>
 
   <nav class="tabs" role="tablist" aria-label="Sections">
-    <button class="tab-btn active" data-tab="now" role="tab" aria-selected="true" aria-controls="tab-now" type="button">
+    <button class="tab-btn active" data-tab="now" role="tab" aria-selected="true" aria-controls="tab-now" id="tabbtn-now" type="button">
       <span class="tab-num">01</span>Now
     </button>
-    <button class="tab-btn" data-tab="forecast" role="tab" aria-selected="false" aria-controls="tab-forecast" type="button">
+    <button class="tab-btn" data-tab="forecast" role="tab" aria-selected="false" aria-controls="tab-forecast" id="tabbtn-forecast" tabindex="-1" type="button">
       <span class="tab-num">02</span>Forecast
     </button>
-    <button class="tab-btn" data-tab="trends" role="tab" aria-selected="false" aria-controls="tab-trends" type="button">
+    <button class="tab-btn" data-tab="trends" role="tab" aria-selected="false" aria-controls="tab-trends" id="tabbtn-trends" tabindex="-1" type="button">
       <span class="tab-num">03</span>Trends &amp; Records
     </button>
-    <button class="tab-btn" data-tab="wind" role="tab" aria-selected="false" aria-controls="tab-wind" type="button">
+    <button class="tab-btn" data-tab="wind" role="tab" aria-selected="false" aria-controls="tab-wind" id="tabbtn-wind" tabindex="-1" type="button">
       <span class="tab-num">04</span>Wind &amp; Air
     </button>
   </nav>
 
   <main>
     <!-- ============ NOW ============ -->
-    <section class="tab-panel active" id="tab-now" role="tabpanel">
+    <section class="tab-panel active" id="tab-now" role="tabpanel" aria-labelledby="tabbtn-now">
+      <h2 class="visually-hidden">Now — Current Conditions</h2>
       <div class="bento-grid" id="now-bento">
         <div class="hero-card area-hero" id="hero-card">
-          <div class="hero-icon" id="hero-icon"></div>
-          <div class="hero-main">
+          <div class="hero-icon" id="hero-icon" aria-hidden="true"></div>
+          <div class="hero-main" aria-live="polite">
             <div class="hero-temp"><span class="num" id="hero-temp">--</span><span class="hero-deg">°C</span></div>
             <div class="hero-condition" id="hero-condition">Loading…</div>
             <div class="hero-feels" id="hero-feels"></div>
+            <div class="hero-aqi-chip" id="hero-aqi-chip"></div>
           </div>
           <div class="hero-meta">
             <div id="hero-updated">—</div>
@@ -75,15 +88,15 @@
           </div>
         </div>
 
-        <div id="now-stats"></div>
+        <div id="now-stats" aria-live="polite"></div>
 
         <div class="panel-card area-sun" id="sun-card">
           <h3 class="eyebrow">Sun &amp; Moon</h3>
-          <div id="sun-body"></div>
+          <div id="sun-body" aria-live="polite"></div>
         </div>
         <div class="panel-card area-aqi" id="aqi-card">
           <h3 class="eyebrow">Air Quality</h3>
-          <div id="aqi-body"></div>
+          <div id="aqi-body" aria-live="polite"></div>
         </div>
 
         <div class="panel-card area-location">
@@ -98,18 +111,19 @@
     </section>
 
     <!-- ============ FORECAST ============ -->
-    <section class="tab-panel" id="tab-forecast" role="tabpanel" hidden>
+    <section class="tab-panel" id="tab-forecast" role="tabpanel" aria-labelledby="tabbtn-forecast" hidden>
+      <h2 class="visually-hidden">Forecast</h2>
       <div class="panel-card">
         <div class="panel-head">
-          <h2 class="eyebrow">24H Temperature — Today / Yesterday / Normal</h2>
+          <h3 class="eyebrow">24H Temperature — Today / Yesterday / Normal</h3>
           <span class="panel-note" id="today-chart-note"></span>
         </div>
-        <div id="chart-today" class="chart-wrap"></div>
+        <div id="chart-today" class="chart-wrap" aria-live="polite"></div>
       </div>
 
       <div class="panel-card">
         <div class="panel-head">
-          <h2 class="eyebrow">48-Hour Forecast</h2>
+          <h3 class="eyebrow">48-Hour Forecast</h3>
           <span class="panel-note">Hourly, Asia/Kolkata</span>
         </div>
         <div class="table-scroll collapsed" id="forecast-table-scroll">
@@ -127,7 +141,7 @@
                 <th scope="col">Pres hPa</th>
               </tr>
             </thead>
-            <tbody id="forecast-tbody"></tbody>
+            <tbody id="forecast-tbody" aria-live="polite"></tbody>
           </table>
         </div>
         <button class="expand-btn" id="forecast-expand-btn" type="button" aria-expanded="false" aria-controls="forecast-table-scroll">
@@ -137,59 +151,61 @@
     </section>
 
     <!-- ============ TRENDS & RECORDS ============ -->
-    <section class="tab-panel" id="tab-trends" role="tabpanel" hidden>
+    <section class="tab-panel" id="tab-trends" role="tabpanel" aria-labelledby="tabbtn-trends" hidden>
+      <h2 class="visually-hidden">Trends &amp; Records</h2>
       <div class="panel-card">
         <div class="panel-head">
-          <h2 class="eyebrow">Trends</h2>
+          <h3 class="eyebrow">Trends</h3>
           <div class="seg" role="tablist" aria-label="Trend range">
             <button data-range="7" class="active" role="tab" aria-selected="true" type="button">7D</button>
             <button data-range="30" role="tab" aria-selected="false" type="button">30D</button>
           </div>
         </div>
-        <div class="grid-4" id="trend-grid"></div>
+        <div class="grid-4" id="trend-grid" aria-live="polite"></div>
       </div>
 
       <div class="grid-2 spaced">
         <div class="panel-card">
-          <h2 class="eyebrow">Records &amp; Percentiles</h2>
-          <div id="records-box"></div>
+          <h3 class="eyebrow">Records &amp; Percentiles</h3>
+          <div id="records-box" aria-live="polite"></div>
         </div>
         <div class="panel-card">
-          <h2 class="eyebrow">Rainfall Accounting</h2>
-          <div id="rainfall-box"></div>
+          <h3 class="eyebrow">Rainfall Accounting</h3>
+          <div id="rainfall-box" aria-live="polite"></div>
         </div>
       </div>
 
       <div class="panel-card">
-        <h2 class="eyebrow">Calendar — Daily Mean Temperature</h2>
-        <div id="calendar-box"></div>
+        <h3 class="eyebrow">Calendar — Daily Mean Temperature</h3>
+        <div id="calendar-box" aria-live="polite"></div>
       </div>
     </section>
 
     <!-- ============ WIND & AIR ============ -->
-    <section class="tab-panel" id="tab-wind" role="tabpanel" hidden>
+    <section class="tab-panel" id="tab-wind" role="tabpanel" aria-labelledby="tabbtn-wind" hidden>
+      <h2 class="visually-hidden">Wind &amp; Air</h2>
       <div class="grid-2 spaced">
         <div class="panel-card">
-          <h2 class="eyebrow">Wind Rose — Last 7 Days</h2>
-          <div id="windrose-box"></div>
+          <h3 class="eyebrow">Wind Rose — Last 7 Days</h3>
+          <div id="windrose-box" aria-live="polite"></div>
         </div>
         <div class="panel-card">
-          <h2 class="eyebrow">Air Quality Detail</h2>
-          <div id="aqi-detail-box"></div>
+          <h3 class="eyebrow">Air Quality Detail</h3>
+          <div id="aqi-detail-box" aria-live="polite"></div>
         </div>
       </div>
 
       <div class="panel-card">
         <div class="panel-head">
-          <h2 class="eyebrow">72-Hour Air Quality Forecast</h2>
-          <span class="panel-note">US AQI, Asia/Kolkata</span>
+          <h3 class="eyebrow">72-Hour Air Quality Forecast</h3>
+          <span class="panel-note">CPCB AQI, Asia/Kolkata</span>
         </div>
-        <div id="chart-aqi-forecast" class="chart-wrap"></div>
+        <div id="chart-aqi-forecast" class="chart-wrap" aria-live="polite"></div>
       </div>
 
       <div class="panel-card">
-        <h2 class="eyebrow">Comfort &amp; Derived Metrics</h2>
-        <div class="grid-3" id="comfort-grid"></div>
+        <h3 class="eyebrow">Comfort &amp; Derived Metrics</h3>
+        <div class="grid-3" id="comfort-grid" aria-live="polite"></div>
       </div>
     </section>
   </main>
@@ -197,6 +213,6 @@
   <footer id="footer"></footer>
 </div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-<script src="app.js?v=20260727b"></script>
+<script src="app.js?v=20260727c"></script>
 </body>
 </html>

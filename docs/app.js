@@ -2,11 +2,13 @@
 
 /* ============================== CONFIG ============================== */
 const LAT = 12.9716, LON = 77.5946, TZ = "Asia/Kolkata";
-const REFRESH_MS = 10 * 60 * 1000;
+const REFRESH_MS = 15 * 60 * 1000;
+const FETCH_TIMEOUT_MS = 10000;
 const HIST_YEARS = 10;
 const FORECAST_URL = "https://api.open-meteo.com/v1/forecast";
 const AQ_URL = "https://air-quality-api.open-meteo.com/v1/air-quality";
 const ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive";
+const CACHE_STATE_KEY = "bwi_last_good_state_v1";
 
 const svgNS = "http://www.w3.org/2000/svg";
 
@@ -32,10 +34,21 @@ function isoDate(d) { return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-
 function addDays(d, n) { const c = new Date(d); c.setDate(c.getDate() + n); return c; }
 function dayOfYear(d) { const start = new Date(d.getFullYear(), 0, 0); return Math.floor((d - start) / 86400000); }
 
-async function fetchJSON(url) {
-  const resp = await fetch(url);
-  if (!resp.ok) throw new Error("HTTP " + resp.status);
-  return resp.json();
+// Every network call goes through this: a hung connection (dead wifi, stalled CDN) would
+// otherwise leave a panel showing a skeleton forever with no way out except a manual reload.
+async function fetchJSON(url, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs || FETCH_TIMEOUT_MS);
+  try {
+    const resp = await fetch(url, { signal: controller.signal });
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    return await resp.json();
+  } catch (e) {
+    if (e.name === "AbortError") throw new Error("Timed out after " + Math.round((timeoutMs || FETCH_TIMEOUT_MS) / 1000) + "s");
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function cacheGet(key, maxAgeMs) {
@@ -43,8 +56,8 @@ function cacheGet(key, maxAgeMs) {
     const raw = localStorage.getItem(key);
     if (!raw) return null;
     const { t, v } = JSON.parse(raw);
-    if (Date.now() - t > maxAgeMs) return null;
-    return v;
+    if (maxAgeMs != null && Date.now() - t > maxAgeMs) return null;
+    return { value: v, age: Date.now() - t };
   } catch (e) { return null; }
 }
 function cacheSet(key, value) {
@@ -61,26 +74,6 @@ function uvBand(uv) {
   if (uv < 8) return "HIGH";
   if (uv < 11) return "VERY HIGH";
   return "EXTREME";
-}
-function aqiBand(aqi) {
-  if (aqi == null) return "—";
-  if (aqi <= 50) return "GOOD";
-  if (aqi <= 100) return "MODERATE";
-  if (aqi <= 150) return "USG";
-  if (aqi <= 200) return "UNHEALTHY";
-  if (aqi <= 300) return "V.UNHEALTHY";
-  return "HAZARDOUS";
-}
-
-// Standard US EPA / AirNow AQI category guidance text.
-function aqiAdvisory(aqi) {
-  if (aqi == null) return null;
-  if (aqi <= 50) return "Air quality is satisfactory, and air pollution poses little or no risk.";
-  if (aqi <= 100) return "Acceptable, but there may be a risk for people unusually sensitive to air pollution.";
-  if (aqi <= 150) return "Sensitive groups may experience health effects. The general public is less likely to be affected.";
-  if (aqi <= 200) return "Some members of the general public may experience health effects; sensitive groups may experience more serious effects.";
-  if (aqi <= 300) return "Health alert: the risk of health effects is increased for everyone.";
-  return "Health warning of emergency conditions: everyone is more likely to be affected.";
 }
 
 // Heat index (NWS Rothfusz regression). Valid roughly for T >= 27C and RH >= 40%; else returns null.
@@ -128,7 +121,7 @@ function moonPhase(date) {
 
 // Draws the moon's illuminated silhouette as two overlapping circles (no astronomy library,
 // no emoji — emoji moon glyphs render at wildly inconsistent sizes across fonts/platforms and
-// clash with the monochrome instrument aesthetic).
+// clash with the instrument aesthetic).
 function moonPhaseSVG(frac, size) {
   const r = size / 2 - 1.5;
   const cx = size / 2, cy = size / 2;
@@ -136,18 +129,87 @@ function moonPhaseSVG(frac, size) {
   const dir = frac < 0.5 ? -1 : 1;
   const offsetX = dir * 2 * r * illum;
   return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" aria-hidden="true">
-    <circle cx="${cx}" cy="${cy}" r="${r}" fill="var(--ink)" stroke="var(--ink-3)" stroke-width="1"/>
-    <circle cx="${cx + offsetX}" cy="${cy}" r="${r}" fill="var(--panel)"/>
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="var(--text-hi)" stroke="var(--text-low)" stroke-width="1"/>
+    <circle cx="${cx + offsetX}" cy="${cy}" r="${r}" fill="var(--card)"/>
   </svg>`;
 }
-
-function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
 
 function percentileRank(value, arr) {
   const clean = arr.filter((v) => v != null && !Number.isNaN(v));
   if (!clean.length || value == null) return null;
   const below = clean.filter((v) => v < value).length;
   return Math.round((below / clean.length) * 100);
+}
+
+/* ============================== CPCB NATIONAL AQI (India) ==============================
+   Breakpoints per the CPCB National Air Quality Index (2014), sub-index computed by linear
+   interpolation within each pollutant's band; overall AQI = the worst (highest) sub-index,
+   and that pollutant is reported as "dominant." Units: µg/m³ for all except CO (mg/m³) —
+   Open-Meteo reports CO in µg/m³, converted /1000 before use. */
+const CPCB_BREAKPOINTS = {
+  pm2_5: [[0, 30], [31, 60], [61, 90], [91, 120], [121, 250], [251, 500]],
+  pm10: [[0, 50], [51, 100], [101, 250], [251, 350], [351, 430], [431, 600]],
+  no2: [[0, 40], [41, 80], [81, 180], [181, 280], [281, 400], [401, 600]],
+  so2: [[0, 40], [41, 80], [81, 380], [381, 800], [801, 1600], [1601, 2000]],
+  o3: [[0, 50], [51, 100], [101, 168], [169, 208], [209, 748], [749, 1000]],
+  co: [[0, 1.0], [1.1, 2.0], [2.1, 10], [10.1, 17], [17.1, 34], [34.1, 50]],
+};
+const CPCB_AQI_BANDS = [[0, 50], [51, 100], [101, 200], [201, 300], [301, 400], [401, 500]];
+const CPCB_CATEGORIES = [
+  { name: "Good", token: "good" },
+  { name: "Satisfactory", token: "moderate" },
+  { name: "Moderate", token: "poor" },
+  { name: "Poor", token: "unhealthy" },
+  { name: "Very Poor", token: "severe" },
+  { name: "Severe", token: "hazard" },
+];
+const POLLUTANT_LABELS = { pm2_5: "PM2.5", pm10: "PM10", no2: "NO₂", so2: "SO₂", o3: "O₃", co: "CO" };
+// CPCB's own published health-effect guidance per category (National AQI, 2014).
+const CPCB_ADVISORY = [
+  "Minimal impact on health.",
+  "May cause minor breathing discomfort to sensitive people.",
+  "May cause breathing discomfort to people with lung disease such as asthma, and discomfort to people with heart disease, children and older adults.",
+  "May cause breathing discomfort to people on prolonged exposure, and discomfort to people with heart disease.",
+  "May cause respiratory illness on prolonged exposure. Effects may be more pronounced in people with lung and heart disease.",
+  "May cause respiratory effects even on healthy people, and serious health impacts on people with lung or heart disease — even during light physical activity.",
+];
+
+function cpcbSubIndex(pollutant, conc) {
+  if (conc == null || Number.isNaN(conc)) return null;
+  const bands = CPCB_BREAKPOINTS[pollutant];
+  for (let i = 0; i < bands.length; i++) {
+    const [lo, hi] = bands[i];
+    if (conc <= hi || i === bands.length - 1) {
+      const [siLo, siHi] = CPCB_AQI_BANDS[i];
+      const frac = hi === lo ? 0 : Math.max(0, conc - lo) / (hi - lo);
+      return Math.round(siLo + frac * (siHi - siLo));
+    }
+  }
+  return null;
+}
+
+function cpcbCategoryForAqi(aqi) {
+  if (aqi == null) return CPCB_CATEGORIES[0];
+  for (let i = 0; i < CPCB_AQI_BANDS.length; i++) {
+    if (aqi <= CPCB_AQI_BANDS[i][1] || i === CPCB_AQI_BANDS.length - 1) return CPCB_CATEGORIES[i];
+  }
+  return CPCB_CATEGORIES[CPCB_CATEGORIES.length - 1];
+}
+
+// Overall CPCB AQI = worst sub-index across pollutants; that pollutant is "dominant."
+function cpcbOverall(pollutants) {
+  const co_mgm3 = pollutants.carbon_monoxide != null ? pollutants.carbon_monoxide / 1000 : null;
+  const subs = [
+    { key: "pm2_5", value: cpcbSubIndex("pm2_5", pollutants.pm2_5) },
+    { key: "pm10", value: cpcbSubIndex("pm10", pollutants.pm10) },
+    { key: "no2", value: cpcbSubIndex("no2", pollutants.nitrogen_dioxide) },
+    { key: "so2", value: cpcbSubIndex("so2", pollutants.sulphur_dioxide) },
+    { key: "o3", value: cpcbSubIndex("o3", pollutants.ozone) },
+    { key: "co", value: cpcbSubIndex("co", co_mgm3) },
+  ].filter((s) => s.value != null);
+  if (!subs.length) return null;
+  subs.sort((a, b) => b.value - a.value);
+  return { aqi: subs[0].value, dominant: subs[0].key, all: subs };
 }
 
 /* ============================== DATA FETCH ============================== */
@@ -163,22 +225,40 @@ async function fetchForecast() {
 async function fetchAirQuality() {
   const url = `${AQ_URL}?latitude=${LAT}&longitude=${LON}&timezone=${encodeURIComponent(TZ)}` +
     `&current=us_aqi,pm2_5,pm10,nitrogen_dioxide,sulphur_dioxide,ozone,carbon_monoxide` +
-    `&hourly=us_aqi,pm2_5&forecast_days=3`;
+    `&hourly=pm2_5,pm10,nitrogen_dioxide,sulphur_dioxide,ozone,carbon_monoxide&forecast_days=3`;
   return fetchJSON(url);
 }
 
 async function fetchHistorical() {
   const cacheKey = "hist_archive_v1";
   const cached = cacheGet(cacheKey, 24 * 3600 * 1000);
-  if (cached) return cached;
+  if (cached) return cached.value;
   const end = addDays(new Date(), -2); // archive lag safety margin
   const start = new Date(end.getFullYear() - HIST_YEARS, 0, 1);
   const url = `${ARCHIVE_URL}?latitude=${LAT}&longitude=${LON}&timezone=${encodeURIComponent(TZ)}` +
     `&start_date=${isoDate(start)}&end_date=${isoDate(end)}` +
     `&daily=temperature_2m_max,temperature_2m_min,temperature_2m_mean,precipitation_sum`;
-  const data = await fetchJSON(url);
+  const data = await fetchJSON(url, 15000);
   cacheSet(cacheKey, data);
   return data;
+}
+
+// Bengaluru is one grid cell in Open-Meteo's modeled (CAMS) air-quality data — there's no
+// multi-station API available without a keyed provider, which this project deliberately
+// avoids. This queries the same free/keyless endpoint at a few points spread across the
+// city instead: real numbers, honestly labeled as modeled estimates, not ground stations.
+const CITY_POINTS = [
+  { name: "City Centre", lat: 12.9716, lon: 77.5946 },
+  { name: "Whitefield", lat: 12.9698, lon: 77.7500 },
+  { name: "Electronic City", lat: 12.8452, lon: 77.6602 },
+  { name: "Yelahanka", lat: 13.1007, lon: 77.5963 },
+];
+async function fetchCityPointsAqi() {
+  const results = await Promise.allSettled(CITY_POINTS.map((p) => {
+    const url = `${AQ_URL}?latitude=${p.lat}&longitude=${p.lon}&timezone=${encodeURIComponent(TZ)}&current=us_aqi,pm2_5,pm10,nitrogen_dioxide,sulphur_dioxide,ozone,carbon_monoxide`;
+    return fetchJSON(url, 8000);
+  }));
+  return CITY_POINTS.map((p, i) => ({ ...p, data: results[i].status === "fulfilled" ? results[i].value.current : null }));
 }
 
 /* ============================== DERIVED DAILY MAP ============================== */
@@ -220,12 +300,9 @@ function mergeDailyMaps(archiveDaily, hourlyDerived) {
 }
 
 /* ============================== APP STATE ============================== */
-const state = { forecast: null, aq: null, historicalDaily: null, lastLoad: null, nowHourlyIdx: null };
+const state = { forecast: null, aq: null, historicalDaily: null, lastLoad: null, nowHourlyIdx: null, stale: false };
 
 /* ============================== WEATHER ICONS ============================== */
-// Hand-drawn SVG icons (no emoji, no icon font) so sizing/color are fully controlled and
-// consistent with the rest of the instrument. Grouped elements pick up CSS keyframe animations
-// (spin/drift/fall/flash) defined in style.css; prefers-reduced-motion disables all of them.
 function cloudPath() {
   return `<g class="cloud" fill="currentColor" opacity="0.95">
     <rect x="16" y="56" width="66" height="26" rx="13"/>
@@ -300,17 +377,6 @@ function weatherConditionLabel(code) {
   return map[code] || "—";
 }
 
-// Time-of-day bucket, for the hero gradient — purely presentational, computed from sunrise/sunset.
-function timeOfDay(now, sunrise, sunset) {
-  const TWILIGHT_MIN = 40;
-  const t = now.getTime();
-  const sr = sunrise.getTime(), ss = sunset.getTime();
-  if (Math.abs(t - sr) <= TWILIGHT_MIN * 60000) return "dawn";
-  if (Math.abs(t - ss) <= TWILIGHT_MIN * 60000) return "dusk";
-  if (t > sr && t < ss) return "day";
-  return "night";
-}
-
 function todayDailyIndex(daily) {
   const idx = daily.time.indexOf(isoDate(new Date()));
   return idx >= 0 ? idx : daily.time.length - 1;
@@ -342,8 +408,9 @@ function pressureTrend(hourly, idx) {
   return { dir: "steady", delta };
 }
 
-// Compact 24h trend charts that live inside a stat card, replacing what used to be empty
-// vertical space with the actual shape of the last day — real information, not filler.
+// Compact 24h trend charts inside a stat card, with a soft gradient fill under the line —
+// real information (the last day's shape) instead of empty space, with a touch more depth
+// than a bare stroke.
 function sparklineSVG(values, opts = {}) {
   const w = opts.width || 100, h = opts.height || 28;
   const color = opts.color || "currentColor";
@@ -351,6 +418,7 @@ function sparklineSVG(values, opts = {}) {
   if (nums.length < 2) return "";
   const n = values.length;
   const step = w / (n - 1);
+  const gradId = "sg" + Math.random().toString(36).slice(2, 9);
 
   if (opts.mode === "bars") {
     const max = Math.max(...nums, 0.1);
@@ -364,37 +432,23 @@ function sparklineSVG(values, opts = {}) {
   }
 
   const min = Math.min(...nums), max = Math.max(...nums), range = (max - min) || 1;
-  let d = "", lastX = 0, lastY = h / 2;
+  let d = "", lastX = 0, lastY = h / 2, firstX = null, firstY = null;
   values.forEach((v, i) => {
     if (v == null) return;
     const x = i * step, y = h - ((v - min) / range) * h;
     d += (d ? "L" : "M") + x.toFixed(1) + " " + y.toFixed(1) + " ";
+    if (firstX == null) { firstX = x; firstY = y; }
     lastX = x; lastY = y;
   });
+  const fillD = `M ${firstX} ${h} ${d.replace(/^M/, "L").trim()} L ${lastX} ${h} Z`;
   return `<svg class="sparkline" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
+    <defs><linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="${color}" stop-opacity=".35"/><stop offset="100%" stop-color="${color}" stop-opacity="0"/>
+    </linearGradient></defs>
+    <path d="${fillD}" fill="url(#${gradId})" stroke="none"/>
     <path d="${d.trim()}" fill="none" stroke="${color}" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
     <circle cx="${lastX.toFixed(1)}" cy="${lastY.toFixed(1)}" r="2.2" fill="${color}"/>
   </svg>`;
-}
-
-// Shared cold->neutral->hot mapping, reused by the hero glow, the calendar heatmap, the
-// records anomaly, and the forecast table — one scale, applied everywhere heat matters.
-function mixColorArr(c1, c2, f) {
-  return [Math.round(c1[0] + (c2[0] - c1[0]) * f), Math.round(c1[1] + (c2[1] - c1[1]) * f), Math.round(c1[2] + (c2[2] - c1[2]) * f)];
-}
-const HEAT_COLD = [56, 132, 240], HEAT_MID = [255, 205, 110], HEAT_HOT = [235, 64, 64];
-function heatColorArr(t, lo, hi) {
-  if (t == null) return null;
-  const frac = Math.max(0, Math.min(1, (t - lo) / ((hi - lo) || 1)));
-  return frac < 0.5 ? mixColorArr(HEAT_COLD, HEAT_MID, frac / 0.5) : mixColorArr(HEAT_MID, HEAT_HOT, (frac - 0.5) / 0.5);
-}
-function heatColor(t, lo, hi) {
-  const c = heatColorArr(t, lo, hi);
-  return c ? `rgb(${c[0]},${c[1]},${c[2]})` : null;
-}
-function heatColorAlpha(t, lo, hi, alpha) {
-  const c = heatColorArr(t, lo, hi);
-  return c ? `rgba(${c[0]},${c[1]},${c[2]},${alpha})` : null;
 }
 
 function statCard(label, valueHTML, subHTML, areaClass, sparkHTML) {
@@ -429,23 +483,44 @@ function isDarkTheme() {
   return window.matchMedia("(prefers-color-scheme: dark)").matches;
 }
 
-// The Now tab's accent color derives from the current sky gradient (dawn/dusk/night get
-// their own hue) instead of staying the fixed default blue — reusing the same orange/violet
-// already established for the Wind/Trends tabs, so no new colors enter the palette.
-function todAccentColor(tod) {
-  if (tod === "day") return null;
-  const dark = isDarkTheme();
-  if (tod === "dawn" || tod === "dusk") return dark ? "#ff9459" : "#e8783f";
-  if (tod === "night") return dark ? "#9c8bf0" : "#7a63e8";
-  return null;
+/* ============================== AMBIENT SKY GRADIENT ==============================
+   A continuous blend across four keyframe skies (night -> dawn -> day -> dusk -> night)
+   driven by how far "now" sits between sunrise and sunset, not a hard 4-bucket snap —
+   and desaturated under heavy cloud cover. Computed in JS (not CSS) because it needs
+   real interpolation math across more than two colors. */
+function mixRgb(c1, c2, f) {
+  return [Math.round(c1[0] + (c2[0] - c1[0]) * f), Math.round(c1[1] + (c2[1] - c1[1]) * f), Math.round(c1[2] + (c2[2] - c1[2]) * f)];
+}
+function toRgbStr(c) { return `rgb(${c[0]},${c[1]},${c[2]})`; }
+function desaturate(c, amount) {
+  const gray = c[0] * 0.3 + c[1] * 0.59 + c[2] * 0.11;
+  return mixRgb(c, [gray, gray, gray], amount);
 }
 
-function applyNowAccent() {
-  if (document.body.dataset.tab !== "now" || !state.todAccentColor) {
-    document.body.style.removeProperty("--tab-accent");
-    return;
-  }
-  document.body.style.setProperty("--tab-accent", state.todAccentColor);
+const SKY_KEYFRAMES = {
+  night: { a: [10, 12, 30], b: [4, 5, 14] },
+  dawn: { a: [255, 154, 108], b: [106, 90, 205] },
+  day: { a: [79, 166, 255], b: [22, 86, 184] },
+  dusk: { a: [255, 126, 95], b: [61, 43, 107] },
+};
+
+function skyGradient(now, sunrise, sunset, cloudCoverPct) {
+  const t = now.getTime(), sr = sunrise.getTime(), ss = sunset.getTime();
+  const dayLen = ss - sr;
+  const twilight = Math.min(50 * 60000, dayLen * 0.12);
+  let frame1, frame2, mix;
+  if (t < sr - twilight) { frame1 = frame2 = "night"; mix = 0; }
+  else if (t < sr + twilight) { frame1 = "dawn"; frame2 = "day"; mix = (t - (sr - twilight)) / (2 * twilight); if (t < sr) { frame1 = "night"; frame2 = "dawn"; mix = (t - (sr - twilight)) / twilight; } }
+  else if (t < ss - twilight) { frame1 = frame2 = "day"; mix = 0; }
+  else if (t < ss + twilight) { frame1 = "day"; frame2 = "dusk"; mix = (t - (ss - twilight)) / twilight; if (t > ss) { frame1 = "dusk"; frame2 = "night"; mix = (t - ss) / twilight; } }
+  else { frame1 = frame2 = "night"; mix = 0; }
+  mix = Math.max(0, Math.min(1, mix));
+
+  const kf1 = SKY_KEYFRAMES[frame1], kf2 = SKY_KEYFRAMES[frame2];
+  let a = mixRgb(kf1.a, kf2.a, mix), b = mixRgb(kf1.b, kf2.b, mix);
+  const cloudFrac = Math.max(0, Math.min(1, (cloudCoverPct || 0) / 100)) * 0.5;
+  a = desaturate(a, cloudFrac); b = desaturate(b, cloudFrac);
+  return `linear-gradient(135deg, ${toRgbStr(a)}, ${toRgbStr(b)})`;
 }
 
 function renderHero() {
@@ -453,24 +528,37 @@ function renderHero() {
   const idx = state.nowHourlyIdx;
   const todayIdx = todayDailyIndex(daily);
   const sunrise = new Date(daily.sunrise[todayIdx]), sunset = new Date(daily.sunset[todayIdx]);
-  const tod = timeOfDay(new Date(current.time), sunrise, sunset);
+  const now = new Date(current.time);
 
   const card = $("#hero-card");
-  card.className = "hero-card area-hero tod-" + tod;
-  card.style.setProperty("--heat-glow-color", heatColorAlpha(current.temperature_2m, 15, 38, 0.7));
+  card.style.setProperty("--hero-bg", skyGradient(now, sunrise, sunset, current.cloud_cover));
   $("#hero-icon").innerHTML = weatherIconSVG(current.weather_code, current.is_day);
   $("#hero-temp").textContent = fmt(current.temperature_2m, 1);
   $("#hero-temp").style.setProperty("--temp-weight", tempToWeight(current.temperature_2m));
   $("#hero-condition").textContent = weatherConditionLabel(current.weather_code);
   $("#hero-feels").textContent = `Feels like ${fmt(current.apparent_temperature, 1)}°C · Dew point ${fmt(current.dew_point_2m, 1)}°C`;
 
-  const weatherTime = new Date(current.time).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  const weatherTime = now.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
   $("#hero-updated").textContent = `AS OF ${weatherTime}`;
   const r24temp = last24hRange(hourly, idx, "temperature_2m");
   $("#hero-range").textContent = r24temp ? `24H ${fmt(r24temp.min, 1)}–${fmt(r24temp.max, 1)}°C` : "";
 
-  state.todAccentColor = todAccentColor(tod);
-  applyNowAccent();
+  renderHeroAqiChip();
+}
+
+// Item 2: AQI belongs on the front page, not buried at the bottom — value, category, and
+// dominant pollutant sit right in the hero next to temperature.
+function renderHeroAqiChip() {
+  const chip = $("#hero-aqi-chip");
+  if (!chip) return;
+  const aq = state.aq ? state.aq.current : null;
+  if (!aq) { chip.innerHTML = ""; chip.hidden = true; return; }
+  const overall = cpcbOverall(aq);
+  if (!overall) { chip.hidden = true; return; }
+  chip.hidden = false;
+  const cat = cpcbCategoryForAqi(overall.aqi);
+  chip.innerHTML = `<span class="chip-badge" style="background:var(--${cat.token});color:var(--${cat.token}-ink)">${overall.aqi}</span>` +
+    `<span>AQI · ${cat.name} · ${POLLUTANT_LABELS[overall.dominant]} dominant</span>`;
 }
 
 function last24hSeries(hourly, idx, key) {
@@ -484,39 +572,38 @@ function renderNowStats() {
   const grid = $("#now-stats");
   grid.innerHTML = "";
 
-  const dewColor = heatColor(current.dew_point_2m, 10, 26);
-  grid.appendChild(statCard("Dew Point", `<span style="color:${dewColor}">${fmt(current.dew_point_2m, 1)}</span><span class="unit">°C</span>`,
+  grid.appendChild(statCard("Dew Point", `${fmt(current.dew_point_2m, 1)}<span class="unit">°C</span>`,
     "Condensation threshold", "area-dew",
-    sparklineSVG(last24hSeries(hourly, idx, "dew_point_2m"), { color: dewColor })));
+    sparklineSVG(last24hSeries(hourly, idx, "dew_point_2m"), { color: "var(--accent)" })));
 
   const r24hum = last24hRange(hourly, idx, "relative_humidity_2m");
   grid.appendChild(statCard("Humidity", `${fmt(current.relative_humidity_2m, 0)}<span class="unit">%</span>`,
     r24hum ? `24H range ${fmt(r24hum.min, 0)}–${fmt(r24hum.max, 0)}%` : "", "area-humid",
-    sparklineSVG(last24hSeries(hourly, idx, "relative_humidity_2m"), { color: "var(--tab-accent, var(--accent))" })));
+    sparklineSVG(last24hSeries(hourly, idx, "relative_humidity_2m"), { color: "var(--accent)" })));
 
   const pt = pressureTrend(hourly, idx);
   const arrowGlyph = pt.dir === "rising" ? "▲" : pt.dir === "falling" ? "▼" : "→";
   const arrowClass = pt.dir === "rising" ? "up" : pt.dir === "falling" ? "down" : "";
   grid.appendChild(statCard("Pressure", `${fmt(current.pressure_msl, 1)}<span class="unit">hPa</span><span class="arrow ${arrowClass}">${arrowGlyph}</span>`,
     `3h trend: <span class="accent">${pt.dir}</span> ${fmt(Math.abs(pt.delta), 1)} hPa`, "area-pressure",
-    sparklineSVG(last24hSeries(hourly, idx, "pressure_msl"), { color: "var(--tab-accent, var(--accent))" })));
+    sparklineSVG(last24hSeries(hourly, idx, "pressure_msl"), { color: "var(--accent)" })));
 
   const windArrow = `<svg class="vec" width="14" height="14" viewBox="0 0 12 12" style="transform:rotate(${current.wind_direction_10m}deg)"><path d="M6 1 L9 8 L6 6 L3 8 Z" fill="currentColor"/></svg>`;
   grid.appendChild(statCard("Wind", `${fmt(current.wind_speed_10m, 1)}<span class="unit">km/h</span>${windArrow}`,
     `From ${fmt(current.wind_direction_10m, 0)}° ${degToCompass(current.wind_direction_10m)} · gusts ${fmt(current.wind_gusts_10m, 1)} km/h`, "area-wind",
-    sparklineSVG(last24hSeries(hourly, idx, "wind_speed_10m"), { color: "var(--tab-accent, var(--accent))", width: 220 })));
+    sparklineSVG(last24hSeries(hourly, idx, "wind_speed_10m"), { color: "var(--accent)", width: 220 })));
 
   const vis = hourly.visibility[idx];
   grid.appendChild(statCard("Visibility", vis != null ? `${fmt(vis / 1000, 1)}<span class="unit">km</span>` : "—", "Cloud cover " + fmt(current.cloud_cover, 0) + "%", "area-vis"));
 
   grid.appendChild(statCard("UV Index", `${fmt(current.uv_index, 1)}`, `<span class="accent">${uvBand(current.uv_index)}</span>`, "area-uv",
-    sparklineSVG(last24hSeries(hourly, idx, "uv_index"), { color: "var(--tab-accent, var(--accent))" })));
+    sparklineSVG(last24hSeries(hourly, idx, "uv_index"), { color: "var(--accent)" })));
 
   const todayPrecip = daily.precipitation_sum[todayIdx];
   const rainProb = hourly.precipitation_probability[idx];
   grid.appendChild(statCard("Precipitation", `${fmt(current.precipitation, 1)}<span class="unit">mm/hr</span>`,
     `${fmt(rainProb, 0)}% chance next hour · ${fmt(todayPrecip, 1)}mm today`, "area-precip",
-    sparklineSVG(last24hSeries(hourly, idx, "precipitation"), { mode: "bars", color: "var(--tab-accent, var(--accent))" })));
+    sparklineSVG(last24hSeries(hourly, idx, "precipitation"), { mode: "bars", color: "var(--accent)" })));
 }
 
 function renderSunCard() {
@@ -550,34 +637,32 @@ function renderSunCard() {
   box.appendChild(moonRow);
 }
 
-const AQI_COLORS = { good: "#0a8a3a", moderate: "#e0a800", usg: "#e8783f", unhealthy: "#d0362f", vunhealthy: "#8b3fae", hazardous: "#6b1b26" };
-function aqiColorKey(aqi) {
-  if (aqi == null) return null;
-  if (aqi <= 50) return "good";
-  if (aqi <= 100) return "moderate";
-  if (aqi <= 150) return "usg";
-  if (aqi <= 200) return "unhealthy";
-  if (aqi <= 300) return "vunhealthy";
-  return "hazardous";
-}
-
 function renderAqiCard() {
   const box = $("#aqi-body");
   box.innerHTML = "";
   const aq = state.aq ? state.aq.current : null;
   if (!aq) {
-    box.appendChild(el("p", "panel-error", "Air quality feed unavailable — retrying in 60s."));
+    box.appendChild(buildErrorCard("Air quality feed unavailable.", () => scheduleFeedRetry("aq", true)));
     return;
   }
-  const key = aqiColorKey(aq.us_aqi);
-  const badge = el("div", "aqi-badge num", fmt(aq.us_aqi, 0));
-  badge.style.color = AQI_COLORS[key];
-  box.appendChild(badge);
-  const pill = el("span", "aqi-band-pill", aqiBand(aq.us_aqi));
-  pill.style.background = AQI_COLORS[key];
-  box.appendChild(pill);
-  const advisory = aqiAdvisory(aq.us_aqi);
-  if (advisory) box.appendChild(el("p", "aqi-advisory", advisory));
+  const overall = cpcbOverall(aq);
+  const cat = overall ? cpcbCategoryForAqi(overall.aqi) : null;
+  // Item 9: tint the card 6% toward the current AQI category's semantic color, transitioning
+  // over 2s (see .area-aqi in style.css); reset to the neutral card color if data is missing.
+  const card = $("#aqi-card");
+  if (card) card.style.setProperty("--aqi-tint", cat ? `var(--${cat.token})` : "transparent");
+  if (overall && cat) {
+    const badge = el("div", "aqi-badge num", String(overall.aqi));
+    badge.style.background = `var(--${cat.token})`;
+    badge.style.color = `var(--${cat.token}-ink)`;
+    box.appendChild(badge);
+    const pill = el("span", "aqi-band-pill", cat.name);
+    pill.style.background = `var(--${cat.token})`;
+    pill.style.color = `var(--${cat.token}-ink)`;
+    box.appendChild(pill);
+    box.appendChild(el("p", "aqi-dominant", `Dominant pollutant: ${POLLUTANT_LABELS[overall.dominant]}`));
+    box.appendChild(el("p", "aqi-advisory", CPCB_ADVISORY[CPCB_CATEGORIES.indexOf(cat)]));
+  }
   const sub = el("div", "kv-row");
   sub.style.marginTop = "14px";
   sub.appendChild(el("span", "k", "PM2.5"));
@@ -585,51 +670,114 @@ function renderAqiCard() {
   box.appendChild(sub);
 }
 
+function pollutantRow(label, key, val, unit, ref) {
+  const sub = cpcbSubIndex(key, key === "co" ? (val != null ? val / 1000 : null) : val);
+  const cat = sub != null ? cpcbCategoryForAqi(sub) : null;
+  const row = el("div", "pollutant-row");
+  row.title = `${label}: ${fmt(val, 1)} ${unit}` + (cat ? ` — ${cat.name} (CPCB sub-index ${sub})` : "");
+  const top = el("div", "kv-row");
+  const k = el("span", "k");
+  k.innerHTML = `${label}` + (cat ? `<span class="pollutant-cat" style="background:var(--${cat.token});color:var(--${cat.token}-ink)">${cat.name}</span>` : "");
+  top.appendChild(k);
+  top.appendChild(el("span", "v num", fmt(val, 1) + " " + unit));
+  row.appendChild(top);
+  const track = el("div", "pollutant-track");
+  const fill = el("div", "pollutant-fill");
+  fill.style.background = cat ? `var(--${cat.token})` : "var(--accent)";
+  track.appendChild(fill);
+  row.appendChild(track);
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    fill.style.width = val != null ? Math.min(100, (val / ref) * 100) + "%" : "0%";
+  }));
+  return row;
+}
+
 function renderAqiDetail() {
   const box = $("#aqi-detail-box");
   box.innerHTML = "";
   const aq = state.aq ? state.aq.current : null;
   if (!aq) {
-    box.appendChild(el("p", "panel-error", "Air quality feed unavailable — retrying in 60s."));
+    box.appendChild(buildErrorCard("Air quality feed unavailable.", () => scheduleFeedRetry("aq", true)));
     return;
   }
-  const key = aqiColorKey(aq.us_aqi);
-  const head = el("div", "kv-row");
-  const badge = el("span", "aqi-badge num", fmt(aq.us_aqi, 0));
-  badge.style.color = AQI_COLORS[key];
-  head.appendChild(badge);
-  const pill = el("span", "aqi-band-pill", aqiBand(aq.us_aqi));
-  pill.style.background = AQI_COLORS[key];
-  head.appendChild(pill);
-  box.appendChild(head);
-  const advisory = aqiAdvisory(aq.us_aqi);
-  if (advisory) box.appendChild(el("p", "aqi-advisory", advisory));
+  const overall = cpcbOverall(aq);
+  const cat = overall ? cpcbCategoryForAqi(overall.aqi) : null;
+  if (overall && cat) {
+    const head = el("div", "kv-row");
+    const badge = el("span", "aqi-badge num", String(overall.aqi));
+    badge.style.background = `var(--${cat.token})`;
+    badge.style.color = `var(--${cat.token}-ink)`;
+    head.appendChild(badge);
+    const pill = el("span", "aqi-band-pill", cat.name);
+    pill.style.background = `var(--${cat.token})`;
+    pill.style.color = `var(--${cat.token}-ink)`;
+    head.appendChild(pill);
+    box.appendChild(head);
+    box.appendChild(el("p", "aqi-dominant", `Dominant pollutant: ${POLLUTANT_LABELS[overall.dominant]} (drives the overall reading)`));
+    box.appendChild(el("p", "aqi-advisory", CPCB_ADVISORY[CPCB_CATEGORIES.indexOf(cat)]));
+  }
 
   const pollutants = el("div", "pollutant-list");
-  [
-    ["PM2.5", aq.pm2_5, "µg/m³", 100], ["PM10", aq.pm10, "µg/m³", 150],
-    ["Nitrogen Dioxide (NO₂)", aq.nitrogen_dioxide, "µg/m³", 200], ["Sulphur Dioxide (SO₂)", aq.sulphur_dioxide, "µg/m³", 350],
-    ["Ozone (O₃)", aq.ozone, "µg/m³", 180], ["Carbon Monoxide (CO)", aq.carbon_monoxide, "µg/m³", 4000],
-  ].forEach(([label, val, unit, ref]) => {
-    const row = el("div", "pollutant-row");
-    row.title = `${label}: ${fmt(val, 1)} ${unit}`;
-    const top = el("div", "kv-row");
-    top.appendChild(el("span", "k", label));
-    top.appendChild(el("span", "v num", fmt(val, 1) + " " + unit));
-    row.appendChild(top);
-    const track = el("div", "pollutant-track");
-    const fill = el("div", "pollutant-fill");
-    track.appendChild(fill);
-    row.appendChild(track);
-    pollutants.appendChild(row);
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      fill.style.width = val != null ? Math.min(100, (val / ref) * 100) + "%" : "0%";
-    }));
-  });
+  pollutants.appendChild(pollutantRow("PM2.5", "pm2_5", aq.pm2_5, "µg/m³", 250));
+  pollutants.appendChild(pollutantRow("PM10", "pm10", aq.pm10, "µg/m³", 430));
+  pollutants.appendChild(pollutantRow("NO₂", "no2", aq.nitrogen_dioxide, "µg/m³", 400));
+  pollutants.appendChild(pollutantRow("SO₂", "so2", aq.sulphur_dioxide, "µg/m³", 800));
+  pollutants.appendChild(pollutantRow("O₃", "o3", aq.ozone, "µg/m³", 400));
+  pollutants.appendChild(pollutantRow("CO", "co", aq.carbon_monoxide, "µg/m³", 17000));
   box.appendChild(pollutants);
-  const note = el("p", "panel-note", "Source: Open-Meteo Air Quality API — a modeled (CAMS) estimate, not a ground-station reading. Bars are scaled for relative reference, not an official index.");
+
+  const note = el("p", "panel-note", "Source: Open-Meteo Air Quality API — a modeled (CAMS) estimate, not a ground-station reading. Sub-index bars use CPCB National AQI (2014) breakpoints; category labels are shown alongside color, never color alone.");
   note.style.marginTop = "12px";
   box.appendChild(note);
+
+  renderCityPointsTable();
+}
+
+// Item 3 "multiple stations" — see fetchCityPointsAqi(): honestly labeled multi-point
+// modeled data, not real monitoring stations (Open-Meteo has no such API, and this project
+// doesn't introduce a keyed provider to get one).
+function renderCityPointsTable() {
+  const box = $("#aqi-detail-box");
+  const wrap = el("div");
+  wrap.style.marginTop = "16px";
+  wrap.appendChild(el("h3", "eyebrow", "Around the City"));
+  const note = el("p", "panel-note", "Modeled (CAMS) estimates at 4 points across Bengaluru — not independent ground monitoring stations.");
+  wrap.appendChild(note);
+  const tableWrap = el("div");
+  const table = document.createElement("table");
+  table.className = "station-table";
+  table.innerHTML = `<thead><tr><th>Location</th><th>AQI</th><th>Category</th></tr></thead>`;
+  const tbody = document.createElement("tbody");
+  table.appendChild(tbody);
+  tableWrap.appendChild(table);
+  wrap.appendChild(tableWrap);
+  box.appendChild(wrap);
+
+  fetchCityPointsAqi().then((points) => {
+    tbody.innerHTML = "";
+    points.forEach((p) => {
+      const tr = document.createElement("tr");
+      if (!p.data) {
+        tr.innerHTML = `<td>${p.name}</td><td colspan="2" class="num-col">—</td>`;
+        tbody.appendChild(tr);
+        return;
+      }
+      const overall = cpcbOverall(p.data);
+      const cat = overall ? cpcbCategoryForAqi(overall.aqi) : null;
+      const td1 = el("td", null, p.name);
+      const td2 = el("td", "num num-col", overall ? String(overall.aqi) : "—");
+      const td3 = document.createElement("td");
+      if (cat) {
+        const pill = el("span", "pollutant-cat", cat.name);
+        pill.style.background = `var(--${cat.token})`; pill.style.color = `var(--${cat.token}-ink)`;
+        td3.appendChild(pill);
+      } else {
+        td3.textContent = "—";
+      }
+      tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3);
+      tbody.appendChild(tr);
+    });
+  }).catch(() => { tbody.innerHTML = `<tr><td colspan="3">Unavailable</td></tr>`; });
 }
 
 /* ============================== AQI FORECAST CHART ============================== */
@@ -639,19 +787,26 @@ function renderAqiForecastChart() {
   const hourly = state.aq && state.aq.hourly;
   if (!hourly || !hourly.time) {
     root.innerHTML = "";
-    root.appendChild(el("p", "panel-error", "Air quality forecast unavailable — retrying in 60s."));
+    root.appendChild(buildErrorCard("Air quality forecast unavailable.", () => scheduleFeedRetry("aq", true)));
     return;
   }
   const nowT = state.aq.current ? new Date(state.aq.current.time) : new Date();
-  const series = hourly.time.map((t, i) => ({ x: new Date(t), y: hourly.us_aqi[i] }))
-    .filter((p) => p.x.getTime() >= nowT.getTime() - 3600000);
+  const series = hourly.time.map((t, i) => {
+    const overall = cpcbOverall({
+      pm2_5: hourly.pm2_5[i], pm10: hourly.pm10[i],
+      nitrogen_dioxide: hourly.nitrogen_dioxide[i], sulphur_dioxide: hourly.sulphur_dioxide[i],
+      ozone: hourly.ozone[i], carbon_monoxide: hourly.carbon_monoxide[i],
+    });
+    return { x: new Date(t), y: overall ? overall.aqi : null };
+  }).filter((p) => p.x.getTime() >= nowT.getTime() - 3600000);
   drawLineChart(root, {
-    ariaLabel: "US AQI, next 72 hours",
+    ariaLabel: "CPCB AQI, next 72 hours",
     height: 180,
-    xTickFmt: (d) => ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][d.getDay()] + " " + pad2(d.getHours()) + ":00",
+    xTickFmt: (d) => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getDay()] + " " + pad2(d.getHours()) + ":00",
     nowX: nowT,
     yUnit: " AQI",
-    series: [{ data: series, className: "series-a", label: "US AQI", directLabel: true }],
+    fill: true,
+    series: [{ data: series, className: "series-a", label: "CPCB AQI", directLabel: true }],
   });
 }
 
@@ -699,6 +854,13 @@ function drawLineChart(root, opts) {
   svg.setAttribute("role", "img");
   svg.setAttribute("aria-label", opts.ariaLabel || "Chart");
 
+  const defs = document.createElementNS(svgNS, "defs");
+  const grad = document.createElementNS(svgNS, "linearGradient");
+  grad.setAttribute("id", "sparkFillGrad"); grad.setAttribute("x1", "0"); grad.setAttribute("y1", "0"); grad.setAttribute("x2", "0"); grad.setAttribute("y2", "1");
+  grad.innerHTML = `<stop offset="0%" stop-color="var(--accent)" stop-opacity=".35"/><stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/>`;
+  defs.appendChild(grad);
+  svg.appendChild(defs);
+
   const gridCount = 4;
   for (let i = 0; i <= gridCount; i++) {
     const v = yMin + (yMax - yMin) * i / gridCount;
@@ -740,6 +902,15 @@ function drawLineChart(root, opts) {
   series.forEach((s) => {
     const pts = s.data.filter((p) => p.y != null);
     if (!pts.length) return;
+    if (opts.fill && s.className === "series-a") {
+      const fillD = `M ${sx(pts[0].x.getTime())} ${sy(yMin)} ` +
+        pts.map((p) => `L ${sx(p.x.getTime())} ${sy(p.y)}`).join(" ") +
+        ` L ${sx(pts[pts.length - 1].x.getTime())} ${sy(yMin)} Z`;
+      const fillPath = document.createElementNS(svgNS, "path");
+      fillPath.setAttribute("d", fillD);
+      fillPath.setAttribute("class", "fill-a");
+      svg.appendChild(fillPath);
+    }
     const d = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${sx(p.x.getTime())} ${sy(p.y)}`).join(" ");
     const path = document.createElementNS(svgNS, "path");
     path.setAttribute("d", d);
@@ -750,9 +921,8 @@ function drawLineChart(root, opts) {
       pendingLabels.push({ x: Math.min(sx(last.x.getTime()) + 5, width - mR - 2), y: sy(last.y), text: s.label });
     }
   });
-  // Declutter: when two series end close together (e.g. today/yesterday converging), their
-  // direct labels would otherwise overlap into unreadable text. Nudge them apart vertically,
-  // top to bottom, preserving relative order.
+  // Declutter: when two series end close together, their direct labels would otherwise
+  // overlap into unreadable text. Nudge them apart vertically, top to bottom.
   pendingLabels.sort((a, b) => a.y - b.y);
   for (let i = 1; i < pendingLabels.length; i++) {
     const minY = pendingLabels[i - 1].y + 11;
@@ -762,7 +932,6 @@ function drawLineChart(root, opts) {
     const t = document.createElementNS(svgNS, "text");
     t.setAttribute("x", lbl.x); t.setAttribute("y", lbl.y + 3);
     t.setAttribute("class", "direct-label");
-    t.setAttribute("fill", "var(--ink)");
     t.textContent = lbl.text;
     svg.appendChild(t);
   });
@@ -805,7 +974,6 @@ function drawLineChart(root, opts) {
 function renderTodayChart() {
   const { hourly } = state.forecast;
   const idx = state.nowHourlyIdx;
-  // Build "today" series: hours 0..23 of today's date, aligned by hour-of-day.
   const todayDate = new Date(hourly.time[idx]).toDateString();
   const yestDate = addDays(new Date(hourly.time[idx]), -1).toDateString();
 
@@ -817,9 +985,6 @@ function renderTodayChart() {
     if (d.toDateString() === yestDate) yestSeries[hour] = { x: new Date(2000, 0, 1, hour), y: hourly.temperature_2m[i], real: d };
   }
 
-  // Historical normal for today's date: mean per hour-of-day is not available from daily archive,
-  // so approximate the "normal" curve using yesterday's shape scaled to the historical mean/max for
-  // today's calendar date if available, else omit gracefully.
   let normalSeries = [];
   if (state.historicalDaily) {
     const monthDay = isoDate(new Date()).slice(5);
@@ -908,17 +1073,12 @@ function renderForecastTable() {
   const idx = state.nowHourlyIdx;
   const tbody = $("#forecast-tbody");
   tbody.innerHTML = "";
-  const windowTemps = hourly.temperature_2m.slice(idx, idx + 48).filter((v) => v != null);
-  const tMin = windowTemps.length ? Math.min(...windowTemps) : 15, tMax = windowTemps.length ? Math.max(...windowTemps) : 38;
   for (let i = idx; i < Math.min(idx + 48, hourly.time.length); i++) {
     const d = new Date(hourly.time[i]);
     const tr = el("tr", i === idx ? "now-row" : "");
-    tr.appendChild(el("th", null, `${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][d.getDay()]} ${pad2(d.getHours())}:00`));
+    tr.appendChild(el("th", null, `${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getDay()]} ${pad2(d.getHours())}:00`));
     tr.lastChild.setAttribute("scope", "row");
-    const tempCell = el("td", "num", fmt(hourly.temperature_2m[i], 1));
-    tempCell.style.background = heatColorAlpha(hourly.temperature_2m[i], tMin, tMax, 0.22);
-    tempCell.style.boxShadow = `inset 3px 0 0 ${heatColor(hourly.temperature_2m[i], tMin, tMax)}`;
-    tr.appendChild(tempCell);
+    tr.appendChild(el("td", "num", fmt(hourly.temperature_2m[i], 1)));
     tr.appendChild(el("td", "num", fmt(hourly.apparent_temperature[i], 1)));
     tr.appendChild(el("td", "num", fmt(hourly.precipitation_probability[i], 0)));
     tr.appendChild(el("td", "num", fmt(hourly.precipitation[i], 1)));
@@ -937,7 +1097,7 @@ function renderRecords() {
   const todayHigh = daily.temperature_2m_max[todayDailyIndex(daily)];
 
   if (!state.historicalDaily) {
-    box.appendChild(el("p", "panel-error", "Historical archive unavailable — retrying next refresh."));
+    box.appendChild(buildErrorCard("Historical archive unavailable.", () => scheduleFeedRetry("hist", true)));
     return;
   }
   const monthDay = isoDate(new Date()).slice(5);
@@ -972,13 +1132,12 @@ function renderRecords() {
     const recLow = Math.min(...lows);
     const recLowYear = matches.find(([, v]) => v.tmin === recLow)[0].slice(0, 4);
     [
-      ["Record high, this date", `${fmt(recHigh, 1)}°C (${recHighYear})`, heatColor(recHigh, 15, 38)],
-      ["Record low, this date", `${fmt(recLow, 1)}°C (${recLowYear})`, heatColor(recLow, 15, 38)],
-    ].forEach(([k, v, color]) => {
+      ["Record high, this date", `${fmt(recHigh, 1)}°C (${recHighYear})`, "temp-hot"],
+      ["Record low, this date", `${fmt(recLow, 1)}°C (${recLowYear})`, "temp-cold"],
+    ].forEach(([k, v, cls]) => {
       const row = el("div", "stat-row");
       row.appendChild(el("span", "k", k));
-      const val = el("span", "v num", v);
-      val.style.color = color;
+      const val = el("span", "v num " + cls, v);
       row.appendChild(val);
       box.appendChild(row);
     });
@@ -988,7 +1147,7 @@ function renderRecords() {
     const row = el("div", "stat-row");
     row.appendChild(el("span", "k", `Anomaly vs ${HIST_YEARS}y seasonal norm`));
     const v = el("span", "v num");
-    v.innerHTML = `<span class="${anomaly >= 0 ? "heat-hot" : "heat-cold"}">${anomaly >= 0 ? "+" : ""}${fmt(anomaly, 1)}°C</span>`;
+    v.innerHTML = `<span class="${anomaly >= 0 ? "temp-hot" : "temp-cold"}">${anomaly >= 0 ? "+" : ""}${fmt(anomaly, 1)}°C</span>`;
     row.appendChild(v);
     box.appendChild(row);
   }
@@ -1029,7 +1188,7 @@ function renderRainfall() {
   const box = $("#rainfall-box");
   box.innerHTML = "";
   if (!state.historicalDaily) {
-    box.appendChild(el("p", "panel-error", "Historical archive unavailable — retrying next refresh."));
+    box.appendChild(buildErrorCard("Historical archive unavailable.", () => scheduleFeedRetry("hist", true)));
     return;
   }
   const now = new Date();
@@ -1085,9 +1244,6 @@ function renderRainfall() {
   note.style.marginTop = "6px";
   box.appendChild(note);
 
-  // Rainy-day count and the current wet/dry streak — genuinely useful context that a
-  // millimeter total alone doesn't convey (10mm across 8 days reads very differently
-  // from 10mm in one downpour).
   let rainyDaysActual = 0;
   for (let d = 1; d <= dom; d++) {
     const v = state.historicalDaily[`${year}-${pad2(month + 1)}-${pad2(d)}`];
@@ -1138,10 +1294,27 @@ function renderRainfall() {
 }
 
 /* ============================== CALENDAR HEATMAP ============================== */
+// Diverging cold(blue)->neutral->hot(red) scale for the month's own range, using the same
+// theme-aware temp-cold/temp-hot tokens as the Records panel — one consistent heat language.
+function heatColorForMonth(t, lo, hi) {
+  const cold = getComputedStyle(document.documentElement).getPropertyValue("--temp-cold").trim() || "#6D9BFF";
+  const hot = getComputedStyle(document.documentElement).getPropertyValue("--temp-hot").trim() || "#FF7A6E";
+  const mid = isDarkTheme() ? "rgb(150,152,165)" : "rgb(190,190,196)";
+  const frac = Math.max(0, Math.min(1, (t - lo) / ((hi - lo) || 1)));
+  const parse = (c) => {
+    if (c.startsWith("#")) { const n = parseInt(c.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
+    const m = c.match(/\d+/g); return m ? m.slice(0, 3).map(Number) : [128, 128, 128];
+  };
+  const mix = (c1, c2, f) => c1.map((v, i) => Math.round(v + (c2[i] - v) * f));
+  const c1 = parse(cold), c2 = parse(mid), c3 = parse(hot);
+  const rgb = frac < 0.5 ? mix(c1, c2, frac / 0.5) : mix(c2, c3, (frac - 0.5) / 0.5);
+  return `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+}
+
 function renderCalendar() {
   const box = $("#calendar-box");
   box.innerHTML = "";
-  if (!state.historicalDaily) { box.appendChild(el("p", "panel-error", "Historical data unavailable.")); return; }
+  if (!state.historicalDaily) { box.appendChild(buildErrorCard("Historical data unavailable.", () => scheduleFeedRetry("hist", true))); return; }
   const now = new Date();
   const year = now.getFullYear(), month = now.getMonth();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -1154,7 +1327,7 @@ function renderCalendar() {
     if (v && v.tmean != null) monthVals.push(v.tmean);
   }
   const vMin = monthVals.length ? Math.min(...monthVals) : 20, vMax = monthVals.length ? Math.max(...monthVals) : 30;
-  const colorFor = (t) => heatColor(t, vMin, vMax);
+  const colorFor = (t) => heatColorForMonth(t, vMin, vMax);
 
   const todayNum = now.getDate();
   let hasForecastCell = false;
@@ -1216,39 +1389,26 @@ function renderWindRose() {
   const size = 220, cx = size / 2, cy = size / 2, maxR = size / 2 - 26;
   const maxCount = Math.max(...data.map((b) => b.reduce((a, c) => a + c, 0)), 1);
 
-  // Rendered as a dark radar/HUD screen (fixed palette, independent of light/dark theme —
-  // like an instrument gauge) since the old approach reused generic chart grid-line colors
-  // that were nearly invisible against the card background.
   const svg = document.createElementNS(svgNS, "svg");
   svg.setAttribute("viewBox", `0 0 ${size} ${size}`);
   svg.setAttribute("width", size); svg.setAttribute("height", size);
   svg.setAttribute("role", "img");
   svg.setAttribute("aria-label", "Wind rose, last 7 days");
-  svg.setAttribute("class", "radar-svg");
-  svg.innerHTML = `<defs><radialGradient id="radarBg" cx="50%" cy="50%" r="65%">
-    <stop offset="0%" stop-color="#0d1c38"/><stop offset="100%" stop-color="#040a16"/>
-  </radialGradient></defs>
-  <circle cx="${cx}" cy="${cy}" r="${maxR + 18}" fill="url(#radarBg)" stroke="rgba(125,211,252,.4)" stroke-width="1"/>`;
 
-  for (let i = 0; i < 8; i++) {
-    const angle = (i * 45 - 90) * Math.PI / 180;
-    const line = document.createElementNS(svgNS, "line");
-    line.setAttribute("x1", cx); line.setAttribute("y1", cy);
-    line.setAttribute("x2", cx + Math.cos(angle) * (maxR + 14)); line.setAttribute("y2", cy + Math.sin(angle) * (maxR + 14));
-    line.setAttribute("class", "radar-spoke");
-    svg.appendChild(line);
-  }
   [0.25, 0.5, 0.75, 1].forEach((f) => {
     const c = document.createElementNS(svgNS, "circle");
     c.setAttribute("cx", cx); c.setAttribute("cy", cy); c.setAttribute("r", maxR * f);
     c.setAttribute("fill", "none"); c.setAttribute("class", "radar-ring");
     svg.appendChild(c);
   });
-  const sweepR = maxR + 14, sweepAngle = 42 * Math.PI / 180;
-  const sweep = document.createElementNS(svgNS, "path");
-  sweep.setAttribute("d", `M ${cx} ${cy} L ${cx} ${cy - sweepR} A ${sweepR} ${sweepR} 0 0 1 ${(cx + sweepR * Math.sin(sweepAngle)).toFixed(1)} ${(cy - sweepR * Math.cos(sweepAngle)).toFixed(1)} Z`);
-  sweep.setAttribute("class", "radar-sweep");
-  svg.appendChild(sweep);
+  for (let i = 0; i < 8; i++) {
+    const angle = (i * 45 - 90) * Math.PI / 180;
+    const line = document.createElementNS(svgNS, "line");
+    line.setAttribute("x1", cx); line.setAttribute("y1", cy);
+    line.setAttribute("x2", cx + Math.cos(angle) * maxR); line.setAttribute("y2", cy + Math.sin(angle) * maxR);
+    line.setAttribute("class", "radar-spoke");
+    svg.appendChild(line);
+  }
   ["N", "E", "S", "W"].forEach((label, i) => {
     const angle = (i * 90 - 90) * Math.PI / 180;
     const t = document.createElementNS(svgNS, "text");
@@ -1259,7 +1419,8 @@ function renderWindRose() {
     svg.appendChild(t);
   });
 
-  const blues = ["#7dd3fc", "#38bdf8", "#0ea5e9", "#4f46e5"];
+  const accent = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#8B8FF0";
+  const shades = [0.35, 0.55, 0.75, 1].map((a) => `color-mix(in srgb, ${accent} ${a * 100}%, transparent)`);
   for (let b = 0; b < buckets; b++) {
     let acc = 0;
     const angleStart = (b * (360 / buckets) - 90 - (360 / buckets) / 2) * Math.PI / 180;
@@ -1276,8 +1437,8 @@ function renderWindRose() {
       const p3 = [cx + Math.cos(angleEnd) * r1, cy + Math.sin(angleEnd) * r1];
       const p4 = [cx + Math.cos(angleEnd) * r0, cy + Math.sin(angleEnd) * r0];
       path.setAttribute("d", `M ${p1[0]} ${p1[1]} L ${p2[0]} ${p2[1]} L ${p3[0]} ${p3[1]} L ${p4[0]} ${p4[1]} Z`);
-      path.setAttribute("fill", blues[s]);
-      path.setAttribute("stroke", "#040a16");
+      path.setAttribute("fill", shades[s]);
+      path.setAttribute("stroke", "var(--card)");
       path.setAttribute("stroke-width", "1");
       path.setAttribute("class", "rose-petal");
       path.style.transitionDelay = (b * 0.025) + "s";
@@ -1294,7 +1455,7 @@ function renderWindRose() {
   const legend = el("div", "windrose-legend");
   speedBands.forEach((sb, i) => {
     const row = el("div");
-    row.innerHTML = `<span class="sw" style="background:${blues[i]}"></span>${sb.label} km/h`;
+    row.innerHTML = `<span class="sw" style="background:${shades[i]}"></span>${sb.label} km/h`;
     legend.appendChild(row);
   });
   wrap.appendChild(legend);
@@ -1330,9 +1491,9 @@ function renderComfort() {
 /* ============================== STATUS / FOOTER ============================== */
 let refreshTimer = null, countdownTimer = null, nextRefreshAt = null;
 
-function setStatus(text, stale) {
+function setStatus(text, staleFlag) {
   $("#status-text").textContent = text;
-  $("#status-dot").classList.toggle("stale", !!stale);
+  $("#status-dot").classList.toggle("stale", !!staleFlag);
 }
 
 function startCountdown() {
@@ -1346,24 +1507,23 @@ function startCountdown() {
 
 function renderFooter() {
   $("#footer").innerHTML =
-    `Weather &amp; forecast: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo Forecast API</a> (10-min client refresh). ` +
-    `Air quality: <a href="https://open-meteo.com/en/docs/air-quality-api" target="_blank" rel="noopener">Open-Meteo Air Quality API</a> (US AQI, CAMS model — not ground-station). ` +
+    `Weather &amp; forecast: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo Forecast API</a>. ` +
+    `Air quality: <a href="https://open-meteo.com/en/docs/air-quality-api" target="_blank" rel="noopener">Open-Meteo Air Quality API</a> (US AQI + pollutants, CAMS model — not ground-station); AQI category shown on this page uses <a href="https://cpcb.nic.in/displaypdf.php?id=aXRzZW5hL0FpcnF1YWxpdHkvTkFRSV9SZXBvcnRfMTQtMDktMjAxNC5wZGY=" target="_blank" rel="noopener">CPCB National AQI (2014)</a> breakpoints. ` +
     `Historical records &amp; normals: <a href="https://open-meteo.com/en/docs/historical-weather-api" target="_blank" rel="noopener">Open-Meteo Historical Weather API</a>, ${HIST_YEARS} years, cached 24h in your browser. ` +
-    `All fetches run client-side; no server, no API key. Coordinates ${LAT}, ${LON}.`;
+    `All fetches run client-side; no server, no API key. Coordinates ${LAT}, ${LON}.` +
+    `<span class="refresh-note">Auto-refreshes every ${Math.round(REFRESH_MS / 60000)} minutes — see the countdown at top right.</span>`;
 }
 
 /* ============================== INDEPENDENT FEED RETRY ============================== */
-// AQ and historical each get their own 60s retry loop on failure, independent of the 10-min
-// main refresh cycle, so the "retrying in 60s" copy shown in their panels is actually true.
 const feedRetryTimers = { aq: null, hist: null };
-function scheduleFeedRetry(kind) {
+function scheduleFeedRetry(kind, immediate) {
   clearTimeout(feedRetryTimers[kind]);
-  feedRetryTimers[kind] = setTimeout(async () => {
-    if (nextRefreshAt != null && Date.now() >= nextRefreshAt) return; // main refresh will cover it
+  const run = async () => {
+    if (!immediate && nextRefreshAt != null && Date.now() >= nextRefreshAt) return;
     try {
       if (kind === "aq") {
         state.aq = await fetchAirQuality();
-        if (document.body.dataset.tab === "now") renderAqiCard();
+        if (document.body.dataset.tab === "now") { renderAqiCard(); renderHeroAqiChip(); }
         if (document.body.dataset.tab === "wind") { renderAqiDetail(); renderAqiForecastChart(); }
       } else {
         const histRes = await fetchHistorical();
@@ -1371,26 +1531,69 @@ function scheduleFeedRetry(kind) {
         if (document.body.dataset.tab === "trends") { renderRecords(); renderRainfall(); renderCalendar(); }
       }
     } catch (e) {
-      scheduleFeedRetry(kind);
+      if (!immediate) scheduleFeedRetry(kind);
     }
-  }, 60000);
+  };
+  if (immediate) run(); else feedRetryTimers[kind] = setTimeout(run, 60000);
+}
+
+function buildErrorCard(message, onRetry) {
+  const card = el("div", "error-card");
+  const msg = el("div", "msg");
+  msg.innerHTML = `<strong>Unavailable.</strong> ${message}`;
+  card.appendChild(msg);
+  const btn = el("button", "retry-btn", "Retry");
+  btn.type = "button";
+  btn.addEventListener("click", () => { btn.textContent = "Retrying…"; btn.disabled = true; onRetry(); setTimeout(() => { btn.textContent = "Retry"; btn.disabled = false; }, 2000); });
+  card.appendChild(btn);
+  return card;
 }
 
 /* ============================== LOAD / ORCHESTRATION ============================== */
+function showLoadingSkeleton() {
+  $("#now-stats").innerHTML = Array(6).fill('<div class="stat-card"><div class="skel skel-line" style="width:50%"></div><div class="skel skel-line" style="width:70%;height:24px"></div></div>').join("");
+  $("#sun-body").innerHTML = '<div class="skel skel-line"></div><div class="skel skel-line"></div><div class="skel skel-line"></div>';
+  $("#aqi-body").innerHTML = '<div class="skel skel-line" style="width:40%;height:30px"></div>';
+  $("#chart-today").innerHTML = '<div class="skel skel-block"></div>';
+  $("#trend-grid").innerHTML = Array(4).fill('<div class="box"><div class="skel skel-line" style="width:60%"></div><div class="skel skel-block"></div></div>').join("");
+  $("#forecast-tbody").innerHTML = "";
+  $("#records-box").innerHTML = '<div class="skel skel-line"></div><div class="skel skel-line"></div><div class="skel skel-line"></div>';
+  $("#rainfall-box").innerHTML = '<div class="skel skel-line"></div><div class="skel skel-block" style="height:60px"></div>';
+  $("#windrose-box").innerHTML = '<div class="skel skel-block" style="height:220px"></div>';
+  $("#aqi-detail-box").innerHTML = '<div class="skel skel-line"></div><div class="skel skel-line"></div><div class="skel skel-line"></div>';
+  $("#chart-aqi-forecast").innerHTML = '<div class="skel skel-block"></div>';
+  $("#comfort-grid").innerHTML = Array(3).fill('<div class="box"><div class="skel skel-line" style="height:30px"></div></div>').join("");
+}
+
+function updateStaleBadge() {
+  const badge = $("#stale-badge");
+  if (!badge) return;
+  if (state.stale && state.lastLoad) {
+    const mins = Math.round((Date.now() - state.lastLoad) / 60000);
+    badge.hidden = false;
+    badge.textContent = `Showing cached data · updated ${mins < 1 ? "just now" : mins + "m ago"}`;
+  } else {
+    badge.hidden = true;
+  }
+}
+
 async function loadAll(isRefresh) {
   if (!isRefresh) {
-    $("#now-stats").innerHTML = Array(6).fill('<div class="stat-card"><div class="skel skel-line" style="width:50%"></div><div class="skel skel-line" style="width:70%;height:24px"></div></div>').join("");
-    $("#sun-body").innerHTML = '<div class="skel skel-line"></div><div class="skel skel-line"></div><div class="skel skel-line"></div>';
-    $("#aqi-body").innerHTML = '<div class="skel skel-line" style="width:40%;height:30px"></div>';
-    $("#chart-today").innerHTML = '<div class="skel skel-block"></div>';
-    $("#trend-grid").innerHTML = Array(4).fill('<div class="box"><div class="skel skel-line" style="width:60%"></div><div class="skel skel-block"></div></div>').join("");
-    $("#forecast-tbody").innerHTML = "";
-    $("#records-box").innerHTML = '<div class="skel skel-line"></div><div class="skel skel-line"></div><div class="skel skel-line"></div>';
-    $("#rainfall-box").innerHTML = '<div class="skel skel-line"></div><div class="skel skel-block" style="height:60px"></div>';
-    $("#windrose-box").innerHTML = '<div class="skel skel-block" style="height:220px"></div>';
-    $("#aqi-detail-box").innerHTML = '<div class="skel skel-line"></div><div class="skel skel-line"></div><div class="skel skel-line"></div>';
-    $("#chart-aqi-forecast").innerHTML = '<div class="skel skel-block"></div>';
-    $("#comfort-grid").innerHTML = Array(3).fill('<div class="box"><div class="skel skel-line" style="height:30px"></div></div>').join("");
+    // Stale-while-revalidate: a returning visitor sees last-known-good data immediately
+    // (clearly labeled) instead of a blank skeleton, while a fresh fetch runs underneath.
+    const cached = cacheGet(CACHE_STATE_KEY, null);
+    if (cached && cached.value && cached.value.forecast) {
+      state.forecast = cached.value.forecast;
+      state.aq = cached.value.aq;
+      state.historicalDaily = cached.value.historicalDaily;
+      state.nowHourlyIdx = nearestHourlyIndex(state.forecast.hourly, state.forecast.current.time);
+      state.lastLoad = Date.now() - cached.age;
+      state.stale = true;
+      render(false);
+      updateStaleBadge();
+    } else {
+      showLoadingSkeleton();
+    }
   }
   setStatus("Refreshing…");
 
@@ -1401,15 +1604,18 @@ async function loadAll(isRefresh) {
     state.forecast = fRes.value;
     state.nowHourlyIdx = nearestHourlyIndex(state.forecast.hourly, state.forecast.current.time);
   } else {
-    setStatus("Forecast feed unavailable — retrying in 60s", true);
-    $("#hero-condition").textContent = "Forecast feed unavailable";
-    $("#hero-feels").textContent = "Retrying in 60s…";
-    $("#now-stats").innerHTML = '<p class="panel-error">Forecast feed unavailable — retrying in 60s.</p>';
+    if (!state.stale) {
+      setStatus("Forecast feed unavailable", true);
+      $("#now-stats").innerHTML = "";
+      $("#now-stats").appendChild(buildErrorCard(String(fRes.reason && fRes.reason.message || "Request failed") + ".", () => loadAll(false)));
+    } else {
+      setStatus("Refresh failed — showing cached data", true);
+    }
     setTimeout(() => loadAll(true), 60000);
     return;
   }
 
-  state.aq = aqRes.status === "fulfilled" ? aqRes.value : null;
+  state.aq = aqRes.status === "fulfilled" ? aqRes.value : (state.aq || null);
   if (aqRes.status !== "fulfilled") { console.warn("AQ fetch failed", aqRes.reason); scheduleFeedRetry("aq"); }
   else clearTimeout(feedRetryTimers.aq);
 
@@ -1418,11 +1624,14 @@ async function loadAll(isRefresh) {
     const derived = dailyFromHourly(state.forecast.hourly);
     state.historicalDaily = mergeDailyMaps(archiveDaily, derived);
     clearTimeout(feedRetryTimers.hist);
-  } else {
-    state.historicalDaily = null;
+  } else if (!state.historicalDaily) {
     console.warn("Historical fetch failed", histRes.reason);
     scheduleFeedRetry("hist");
   }
+
+  state.stale = false;
+  updateStaleBadge();
+  cacheSet(CACHE_STATE_KEY, { forecast: state.forecast, aq: state.aq, historicalDaily: state.historicalDaily });
 
   render(isRefresh);
   state.lastLoad = Date.now();
@@ -1441,9 +1650,6 @@ function renderLocationCard() {
 }
 
 /* ============================== WEATHER MAP ============================== */
-// A minimal basemap (CartoDB, no labels — the standard OSM mapnik style was too busy for
-// what's meant to be a quiet instrument) with a live RainViewer precipitation radar overlay.
-// Both are free, keyless public tile services, consistent with the rest of the site.
 let weatherMap = null, weatherMapBasemap = null;
 
 function weatherMapBasemapUrl() {
@@ -1456,9 +1662,7 @@ function initWeatherMap() {
   const el = document.getElementById("weather-map");
   if (!el || typeof L === "undefined" || weatherMap) return;
 
-  weatherMap = L.map(el, {
-    center: [LAT, LON], zoom: 9, scrollWheelZoom: false, attributionControl: true,
-  });
+  weatherMap = L.map(el, { center: [LAT, LON], zoom: 9, scrollWheelZoom: false, attributionControl: true });
 
   weatherMapBasemap = L.tileLayer(weatherMapBasemapUrl(), {
     subdomains: "abcd", maxZoom: 18,
@@ -1503,7 +1707,6 @@ function renderForecastTab() {
   renderTodayChart();
   renderForecastTable();
 }
-
 function renderTrendsTab() {
   renderTrendGrid();
   renderRecords();
@@ -1565,9 +1768,6 @@ function initTrendToggle() {
 }
 
 /* ============================== FORECAST TABLE EXPAND ============================== */
-// Progressive disclosure: the 48h table shows just the next 12 hours by default; the full
-// table is one click away. The "collapsed" class lives on the wrapper, not the tbody, so the
-// user's choice survives the 10-minute data refresh without any extra bookkeeping.
 function initForecastExpand() {
   const btn = $("#forecast-expand-btn");
   const wrap = $("#forecast-table-scroll");
@@ -1580,20 +1780,32 @@ function initForecastExpand() {
 }
 
 /* ============================== TABS ============================== */
+// Full ARIA APG tabs pattern: click OR arrow-key navigation moves focus and selection
+// together, Home/End jump to the first/last tab — not just mouse-clickable buttons.
 function initTabs() {
-  const buttons = document.querySelectorAll(".tab-btn");
-  buttons.forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const name = btn.dataset.tab;
-      buttons.forEach((b) => { b.classList.toggle("active", b === btn); b.setAttribute("aria-selected", b === btn ? "true" : "false"); });
-      document.querySelectorAll(".tab-panel").forEach((p) => {
-        const isTarget = p.id === "tab-" + name;
-        p.classList.toggle("active", isTarget);
-        p.hidden = !isTarget;
-      });
-      document.body.dataset.tab = name;
-      applyNowAccent();
-      if (state.forecast && TAB_RENDERERS[name]) TAB_RENDERERS[name]();
+  const buttons = Array.from(document.querySelectorAll(".tab-btn"));
+  function activate(btn, focus) {
+    const name = btn.dataset.tab;
+    buttons.forEach((b) => { b.classList.toggle("active", b === btn); b.setAttribute("aria-selected", b === btn ? "true" : "false"); b.tabIndex = b === btn ? 0 : -1; });
+    document.querySelectorAll(".tab-panel").forEach((p) => {
+      const isTarget = p.id === "tab-" + name;
+      p.classList.toggle("active", isTarget);
+      p.hidden = !isTarget;
+    });
+    document.body.dataset.tab = name;
+    if (focus) btn.focus();
+    if (state.forecast && TAB_RENDERERS[name]) TAB_RENDERERS[name]();
+  }
+  buttons.forEach((btn, i) => {
+    btn.tabIndex = btn.classList.contains("active") ? 0 : -1;
+    btn.addEventListener("click", () => activate(btn, false));
+    btn.addEventListener("keydown", (e) => {
+      let target = null;
+      if (e.key === "ArrowRight") target = buttons[(i + 1) % buttons.length];
+      else if (e.key === "ArrowLeft") target = buttons[(i - 1 + buttons.length) % buttons.length];
+      else if (e.key === "Home") target = buttons[0];
+      else if (e.key === "End") target = buttons[buttons.length - 1];
+      if (target) { e.preventDefault(); activate(target, true); }
     });
   });
   document.body.dataset.tab = "now";
@@ -1614,13 +1826,10 @@ function playIntro() {
   setTimeout(() => {
     intro.classList.add("hide");
     app.classList.add("ready");
-  }, 1600);
+  }, 1200);
 }
 
 /* ============================== HERO TILT ============================== */
-// A restrained mouse-tracked tilt on the single most prominent element on the page — real
-// depth on hover, not a scattered effect on every card. Skipped entirely under
-// prefers-reduced-motion and on touch (no pointermove without a hover-capable pointer).
 function initHeroTilt() {
   const card = $("#hero-card");
   if (!card || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
