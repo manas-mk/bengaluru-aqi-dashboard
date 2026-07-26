@@ -216,6 +216,7 @@ body {
 .panel-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 4px; flex-wrap: wrap; gap: 6px; }
 .panel-head .eyebrow { margin: 0 0 16px; }
 .panel-note { font-size: 11px; color: var(--ink-3); }
+.eyebrow-sm { font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-2); margin: 0 0 8px; }
 
 /* ---------- Cards (glass) ---------- */
 .panel-card {
@@ -322,6 +323,7 @@ body {
 .grid-line { stroke: var(--rule); stroke-width: 1; }
 .axis-lbl { fill: var(--ink-3); font-family: var(--mono); font-size: 9.5px; }
 .now-line { stroke: var(--tab-accent, var(--accent)); stroke-width: 1; stroke-dasharray: 2 2; }
+.zero-line { stroke: var(--ink-3); stroke-width: 1; stroke-dasharray: 3 2; }
 .series-a { stroke: var(--ink); stroke-width: 2; fill: none; stroke-linecap: round; }
 .series-b { stroke: var(--ink-3); stroke-width: 1.5; fill: none; stroke-dasharray: 3 3; stroke-linecap: round; }
 .series-c { stroke: var(--tab-accent, var(--accent)); stroke-width: 1.5; fill: none; stroke-dasharray: 1 3; stroke-linecap: round; }
@@ -368,6 +370,8 @@ table.instrument tbody tr.now-row td:first-child, table.instrument tbody tr.now-
 .stat-row .v { font-weight: 700; }
 .stat-row .v .delta-up { color: var(--tab-accent, var(--accent)); }
 .stat-row .v .delta-down { color: var(--bad); }
+.delta-up { color: var(--tab-accent, var(--accent)); font-weight: 700; }
+.delta-down { color: var(--bad); font-weight: 700; }
 .percentile-bar { height: 8px; background: var(--rule); position: relative; margin-top: 10px; border-radius: 999px; overflow: hidden; }
 .percentile-bar .fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--tab-accent, var(--accent)); border-radius: 999px; }
 .percentile-bar .marker { position: absolute; top: -3px; width: 2px; height: 14px; background: var(--ink); }

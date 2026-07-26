@@ -1,0 +1,49 @@
+{
+  "generated": "2026-07-26T18:12:51.323Z",
+  "lead_hours": [
+    24,
+    48,
+    72
+  ],
+  "records": [
+    {
+      "target_date": "2026-07-27",
+      "predictions": {
+        "24h": {
+          "made_on": "2026-07-26",
+          "tmax": 27.9,
+          "tmin": 20.9,
+          "precip": 1
+        }
+      },
+      "actual": null,
+      "errors": {}
+    },
+    {
+      "target_date": "2026-07-28",
+      "predictions": {
+        "48h": {
+          "made_on": "2026-07-26",
+          "tmax": 28.9,
+          "tmin": 20.8,
+          "precip": 3.2
+        }
+      },
+      "actual": null,
+      "errors": {}
+    },
+    {
+      "target_date": "2026-07-29",
+      "predictions": {
+        "72h": {
+          "made_on": "2026-07-26",
+          "tmax": 28,
+          "tmin": 21.2,
+          "precip": 2
+        }
+      },
+      "actual": null,
+      "errors": {}
+    }
+  ]
+}
