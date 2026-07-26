@@ -45,7 +45,13 @@
 
   <div class="topbar">
     <div class="brand">
-      <h1><span class="city">Bengaluru</span><span class="sub">Weather Instrument</span></h1>
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32" width="26" height="26">
+          <circle cx="16" cy="16" r="15" style="fill:var(--card);stroke:var(--border-inset)"/>
+          <circle cx="16" cy="16" r="7" style="fill:var(--accent)"/>
+        </svg>
+      </span>
+      <h1><span class="city">Bengaluru</span><span class="brand-divider" aria-hidden="true"></span><span class="sub">Weather Instrument</span></h1>
     </div>
     <div class="status">
       <span id="stale-badge" class="stale-badge" hidden aria-live="polite"></span>
