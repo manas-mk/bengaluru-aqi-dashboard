@@ -348,7 +348,7 @@ h1, h2, h3 { font-family: var(--sans); color: var(--text-hi); margin: 0; }
   border-radius: 999px; font-family: var(--mono); font-weight: 800; font-size: 12px;
 }
 .hero-meta { text-align: right; font-size: 11.5px; opacity: .85; line-height: 1.8; font-family: var(--mono); }
-.hero-city-label { color: var(--accent); opacity: 1; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: 2px; }
+.hero-city-label { color: var(--accent); opacity: 1; font-size: 14px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: 5px; }
 @media (max-width: 700px) { .hero-card { padding: 24px 20px; } .hero-meta { text-align: left; width: 100%; } .hero-temp { font-size: 48px; } }
 
 /* ============================================================
