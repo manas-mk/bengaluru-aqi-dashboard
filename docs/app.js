@@ -1920,11 +1920,9 @@ function updatePageMeta() {
   if (desc) desc.setAttribute("content", `Live weather, CPCB-referenced air quality, and climate records for ${cityLabel(state.city)}.`);
 }
 
-function updateBrandUI() {
-  const nameEl = $("#city-btn-name");
-  if (nameEl) nameEl.textContent = state.city.name;
-  const btn = $("#city-btn");
-  if (btn) btn.setAttribute("aria-label", `Change city. Currently showing ${cityLabel(state.city)}.`);
+function updateCityInputDisplay() {
+  const input = $("#city-search-input");
+  if (input) input.value = state.city.name;
 }
 
 // Reflects the selected city in the URL (?lat=&lon=&name=…) so a specific city's view is
@@ -1959,7 +1957,7 @@ function selectCity(city) {
   state.forecast = null; state.aq = null; state.historicalDaily = null; state.nowHourlyIdx = null; state.stale = false;
   try { localStorage.setItem(CITY_STORAGE_KEY, JSON.stringify(city)); } catch (e) { /* quota etc */ }
   updateUrlForCity(city);
-  updateBrandUI();
+  updateCityInputDisplay();
   updatePageMeta();
   updateWeatherMapLocation();
   closeCityPanel();
@@ -1989,22 +1987,23 @@ function bootCity(done) {
 let cityPanelOpen = false, cityActiveIndex = -1, cityResults = [];
 
 function openCityPanel() {
-  const panel = $("#city-panel"), btn = $("#city-btn"), input = $("#city-search-input");
-  if (!panel || !btn) return;
+  const panel = $("#city-panel"), input = $("#city-search-input");
+  if (!panel || !input) return;
   cityPanelOpen = true;
   panel.hidden = false;
-  btn.setAttribute("aria-expanded", "true");
-  if (input) input.setAttribute("aria-expanded", "true");
+  input.setAttribute("aria-expanded", "true");
   renderCityResults([]);
-  if (input) { input.value = ""; input.focus(); }
 }
+// Also restores the input's text to the current city — covers both "closed after picking a
+// new city" (already correct, harmless no-op) and "closed after typing something and backing
+// out via Escape/click-away" (reverts the abandoned query text) with one code path.
 function closeCityPanel() {
-  const panel = $("#city-panel"), btn = $("#city-btn"), input = $("#city-search-input");
-  if (!panel || !btn) return;
+  const panel = $("#city-panel"), input = $("#city-search-input");
+  if (!panel || !input) return;
   cityPanelOpen = false;
   panel.hidden = true;
-  btn.setAttribute("aria-expanded", "false");
-  if (input) input.setAttribute("aria-expanded", "false");
+  input.setAttribute("aria-expanded", "false");
+  input.value = state.city.name;
   cityActiveIndex = -1;
 }
 
@@ -2041,12 +2040,17 @@ function highlightCityOption(delta) {
 }
 
 function initCitySearch() {
-  const btn = $("#city-btn"), panel = $("#city-panel"), input = $("#city-search-input"), locateBtn = $("#city-locate-btn");
-  if (!btn || !panel || !input) return;
+  const panel = $("#city-panel"), input = $("#city-search-input"), locateBtn = $("#city-locate-btn");
+  if (!panel || !input) return;
 
-  btn.addEventListener("click", () => { if (cityPanelOpen) closeCityPanel(); else openCityPanel(); });
-  document.addEventListener("click", (e) => {
-    if (cityPanelOpen && !panel.contains(e.target) && !btn.contains(e.target)) closeCityPanel();
+  // Focus opens the panel and selects the current text so typing immediately replaces it —
+  // the bar doubles as "here's your current city" and "type to change it" in one control.
+  input.addEventListener("focus", () => { openCityPanel(); input.select(); });
+
+  // A short delay (rather than closing on blur immediately) lets a click on a result option
+  // or the locate button register first — both move focus, which would otherwise race the close.
+  input.addEventListener("blur", () => {
+    setTimeout(() => { if (!panel.contains(document.activeElement)) closeCityPanel(); }, 150);
   });
 
   let debounceTimer = null;
@@ -2063,7 +2067,7 @@ function initCitySearch() {
     if (e.key === "ArrowDown") { e.preventDefault(); highlightCityOption(1); }
     else if (e.key === "ArrowUp") { e.preventDefault(); highlightCityOption(-1); }
     else if (e.key === "Enter") { e.preventDefault(); if (cityActiveIndex >= 0 && cityResults[cityActiveIndex]) selectCity(cityResults[cityActiveIndex]); }
-    else if (e.key === "Escape") { closeCityPanel(); btn.focus(); }
+    else if (e.key === "Escape") { closeCityPanel(); }
   });
 
   if (locateBtn) {
@@ -2101,7 +2105,7 @@ initTabs();
 initCitySearch();
 bootCity((city) => {
   state.city = city;
-  updateBrandUI();
+  updateCityInputDisplay();
   updatePageMeta();
   updateWeatherMapLocation();
   loadAll(false);

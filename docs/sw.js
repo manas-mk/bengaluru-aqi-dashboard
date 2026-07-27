@@ -1,11 +1,11 @@
 // App-shell cache only — no build step means this version string is bumped by hand
 // alongside the ?v= on style.css/app.js in index.html whenever either changes.
-const CACHE_NAME = "bwi-shell-20260727e";
+const CACHE_NAME = "bwi-shell-20260727f";
 const SHELL_ASSETS = [
   "./",
   "./index.html",
-  "./style.css?v=20260727e",
-  "./app.js?v=20260727e",
+  "./style.css?v=20260727f",
+  "./app.js?v=20260727f",
   "./manifest.webmanifest",
   "./icon-192.png",
   "./icon-512.png",
