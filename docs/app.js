@@ -56,6 +56,86 @@ function cityShortLabel(city) {
   return code ? `${city.name} (${code})` : city.name;
 }
 
+// A small curated set of hand-drawn landmark silhouettes for the hero card's background —
+// same honest, no-fabrication pattern as CITY_CODES: only the cities below get one, drawn
+// faint and low-opacity via CSS (.hero-landmark) so it never competes with the temperature/
+// condition text; everywhere else just keeps the plain ambient sky gradient.
+const CITY_LANDMARKS = {
+  paris: `<path d="M100,10 L70,128 L59,128 L96,24 Z" fill="currentColor"/>
+    <path d="M100,10 L130,128 L141,128 L104,24 Z" fill="currentColor"/>
+    <line x1="73" y1="86" x2="127" y2="86" stroke="currentColor" stroke-width="3"/>
+    <line x1="64" y1="110" x2="136" y2="110" stroke="currentColor" stroke-width="3"/>`,
+  london: `<rect x="85" y="40" width="30" height="88" fill="currentColor"/>
+    <rect x="80" y="34" width="40" height="8" fill="currentColor"/>
+    <circle cx="100" cy="58" r="9" fill="rgba(0,0,0,.55)"/>
+    <polygon points="82,34 100,4 118,34" fill="currentColor"/>`,
+  "new york": `<rect x="15" y="60" width="24" height="68" fill="currentColor"/>
+    <rect x="42" y="78" width="20" height="50" fill="currentColor"/>
+    <rect x="66" y="30" width="26" height="98" fill="currentColor"/>
+    <line x1="79" y1="30" x2="79" y2="8" stroke="currentColor" stroke-width="3"/>
+    <rect x="96" y="70" width="22" height="58" fill="currentColor"/>
+    <rect x="122" y="45" width="24" height="83" fill="currentColor"/>
+    <rect x="150" y="85" width="20" height="43" fill="currentColor"/>`,
+  tokyo: `<path d="M100,8 L74,128 L126,128 Z" fill="currentColor"/>
+    <line x1="82" y1="90" x2="118" y2="90" stroke="rgba(0,0,0,.55)" stroke-width="4"/>
+    <line x1="87" y1="60" x2="113" y2="60" stroke="rgba(0,0,0,.55)" stroke-width="4"/>`,
+  sydney: `<rect x="30" y="118" width="140" height="10" fill="currentColor"/>
+    <path d="M45,118 Q60,55 85,118 Z" fill="currentColor"/>
+    <path d="M80,118 Q100,35 125,118 Z" fill="currentColor"/>
+    <path d="M115,118 Q133,60 155,118 Z" fill="currentColor"/>`,
+  rome: `<rect x="15" y="55" width="170" height="73" rx="30" fill="currentColor"/>
+    <g fill="rgba(0,0,0,.5)">
+      <rect x="30" y="70" width="9" height="14"/><rect x="46" y="66" width="9" height="14"/>
+      <rect x="62" y="63" width="9" height="14"/><rect x="78" y="61" width="9" height="14"/>
+      <rect x="95" y="60" width="9" height="14"/><rect x="112" y="61" width="9" height="14"/>
+      <rect x="128" y="63" width="9" height="14"/><rect x="144" y="66" width="9" height="14"/>
+      <rect x="160" y="70" width="9" height="14"/>
+    </g>`,
+  dubai: `<rect x="85" y="95" width="30" height="33" fill="currentColor"/>
+    <rect x="90" y="55" width="20" height="40" fill="currentColor"/>
+    <rect x="94" y="25" width="12" height="30" fill="currentColor"/>
+    <line x1="100" y1="25" x2="100" y2="2" stroke="currentColor" stroke-width="2"/>`,
+  cairo: `<polygon points="40,128 68,82 96,128" fill="currentColor" opacity="0.6"/>
+    <polygon points="62,128 100,58 138,128" fill="currentColor"/>
+    <polygon points="122,128 147,92 172,128" fill="currentColor" opacity="0.6"/>`,
+  "rio de janeiro": `<path d="M55,128 Q100,100 145,128 Z" fill="currentColor"/>
+    <circle cx="100" cy="38" r="6" fill="currentColor"/>
+    <rect x="96" y="44" width="8" height="55" fill="currentColor"/>
+    <rect x="60" y="50" width="80" height="7" fill="currentColor"/>`,
+  moscow: `<rect x="25" y="112" width="150" height="16" fill="currentColor"/>
+    <rect x="42" y="88" width="10" height="24" fill="currentColor"/>
+    <path d="M47,88 C36,78 36,62 47,58 C58,62 58,78 47,88 Z" fill="currentColor"/>
+    <rect x="72" y="80" width="10" height="32" fill="currentColor"/>
+    <path d="M77,80 C64,68 64,48 77,42 C90,48 90,68 77,80 Z" fill="currentColor"/>
+    <rect x="95" y="72" width="10" height="40" fill="currentColor"/>
+    <path d="M100,72 C86,58 86,32 100,24 C114,32 114,58 100,72 Z" fill="currentColor"/>
+    <rect x="118" y="80" width="10" height="32" fill="currentColor"/>
+    <path d="M123,80 C110,68 110,48 123,42 C136,48 136,68 123,80 Z" fill="currentColor"/>
+    <rect x="148" y="88" width="10" height="24" fill="currentColor"/>
+    <path d="M153,88 C142,78 142,62 153,58 C164,62 164,78 153,88 Z" fill="currentColor"/>`,
+  bengaluru: `<rect x="35" y="92" width="130" height="36" fill="currentColor"/>
+    <path d="M75,92 A25,25 0 0,1 125,92 Z" fill="currentColor"/>
+    <path d="M42,92 A12,12 0 0,1 66,92 Z" fill="currentColor"/>
+    <path d="M134,92 A12,12 0 0,1 158,92 Z" fill="currentColor"/>
+    <g stroke="rgba(0,0,0,.5)" stroke-width="3">
+      <line x1="55" y1="98" x2="55" y2="122"/><line x1="75" y1="98" x2="75" y2="122"/>
+      <line x1="100" y1="98" x2="100" y2="122"/><line x1="125" y1="98" x2="125" y2="122"/>
+      <line x1="145" y1="98" x2="145" y2="122"/>
+    </g>`,
+  bangalore: null, // filled in below to alias bengaluru
+  singapore: `<rect x="45" y="45" width="16" height="83" fill="currentColor"/>
+    <rect x="92" y="30" width="16" height="98" fill="currentColor"/>
+    <rect x="139" y="45" width="16" height="83" fill="currentColor"/>
+    <path d="M40,50 Q100,25 160,50 L160,62 Q100,40 40,62 Z" fill="currentColor"/>`,
+};
+CITY_LANDMARKS.bangalore = CITY_LANDMARKS.bengaluru;
+
+function landmarkSVG(city) {
+  const inner = CITY_LANDMARKS[city.name.trim().toLowerCase()];
+  if (!inner) return "";
+  return `<svg viewBox="0 0 200 130" preserveAspectRatio="xMaxYMax meet" aria-hidden="true">${inner}</svg>`;
+}
+
 const svgNS = "http://www.w3.org/2000/svg";
 
 /* ============================== UTILS ============================== */
@@ -602,6 +682,8 @@ function renderHero() {
   // the search bar, which is mid-typing/ambiguous while the user is actively searching.
   const cityEl = $("#hero-city");
   if (cityEl) cityEl.textContent = state.city.country ? `${state.city.name}, ${state.city.country}` : state.city.name;
+  const landmarkEl = $("#hero-landmark");
+  if (landmarkEl) landmarkEl.innerHTML = landmarkSVG(state.city);
 
   const weatherTime = now.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
   $("#hero-updated").textContent = `AS OF ${weatherTime}`;
@@ -1629,6 +1711,8 @@ function showLoadingSkeleton() {
   // reassures the user which city's data is on its way in, not just once it arrives.
   const cityEl = $("#hero-city");
   if (cityEl) cityEl.textContent = state.city.country ? `${state.city.name}, ${state.city.country}` : state.city.name;
+  const landmarkEl = $("#hero-landmark");
+  if (landmarkEl) landmarkEl.innerHTML = landmarkSVG(state.city);
   $("#hero-updated").textContent = "—";
   $("#hero-range").textContent = "—";
   const chip = $("#hero-aqi-chip");

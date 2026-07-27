@@ -28,7 +28,7 @@
 <!-- bump the ?v= on style.css/app.js (and the matching CACHE_NAME in sw.js) whenever
      either changes — no build step means no content-hashed filenames, so this is what
      forces a stale-cached browser (and the service worker's app-shell cache) to refetch -->
-<link rel="stylesheet" href="style.css?v=20260727l">
+<link rel="stylesheet" href="style.css?v=20260727m">
 </head>
 <body>
 
@@ -98,6 +98,7 @@
       <h2 class="visually-hidden">Now — Current Conditions</h2>
       <div class="bento-grid" id="now-bento">
         <div class="hero-card area-hero" id="hero-card">
+          <div class="hero-landmark" id="hero-landmark" aria-hidden="true"></div>
           <div class="hero-icon" id="hero-icon" aria-hidden="true"></div>
           <div class="hero-main" aria-live="polite">
             <div class="hero-temp"><span class="num" id="hero-temp">--</span><span class="hero-deg">°C</span></div>
@@ -237,6 +238,6 @@
   <footer id="footer"></footer>
 </div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-<script src="app.js?v=20260727l"></script>
+<script src="app.js?v=20260727m"></script>
 </body>
 </html>

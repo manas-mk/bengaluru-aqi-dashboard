@@ -329,6 +329,14 @@ h1, h2, h3 { font-family: var(--sans); color: var(--text-hi); margin: 0; }
   transition: background 2s ease, transform .15s ease;
   transform-style: preserve-3d;
 }
+/* Curated per-city landmark silhouette (see CITY_LANDMARKS in app.js) — negative z-index
+   keeps it behind the (non-positioned, so otherwise paints-on-top-regardless) hero content
+   despite being a positioned element; empty/hidden entirely for any city without one. */
+.hero-landmark {
+  position: absolute; right: -6px; bottom: -6px; height: 88%; width: auto; max-width: 60%;
+  color: rgba(255,255,255,.11); z-index: -1; pointer-events: none;
+}
+.hero-landmark svg { display: block; height: 100%; width: auto; }
 .hero-icon { width: 88px; height: 88px; flex: none; }
 .hero-main { flex: 1; min-width: 200px; }
 .hero-temp { font-size: 60px; font-weight: 700; line-height: 1; display: flex; align-items: flex-start; max-width: 100%; }
@@ -349,7 +357,14 @@ h1, h2, h3 { font-family: var(--sans); color: var(--text-hi); margin: 0; }
 }
 .hero-meta { text-align: right; font-size: 11.5px; opacity: .85; line-height: 1.8; font-family: var(--mono); }
 .hero-city-label { color: var(--accent); opacity: 1; font-size: 14px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: 5px; }
-@media (max-width: 700px) { .hero-card { padding: 24px 20px; } .hero-meta { text-align: left; width: 100%; } .hero-temp { font-size: 48px; } }
+@media (max-width: 700px) {
+  .hero-card { padding: 24px 20px; }
+  .hero-meta { text-align: left; width: 100%; }
+  .hero-temp { font-size: 48px; }
+  /* The stacked mobile layout makes the card much taller, which would otherwise scale the
+     landmark (sized as a % of card height) up into something that competes with the meta text. */
+  .hero-landmark { height: 34%; max-width: 34%; opacity: .7; }
+}
 
 /* ============================================================
    STAT CARDS (typography scale: value 28/13/11)
