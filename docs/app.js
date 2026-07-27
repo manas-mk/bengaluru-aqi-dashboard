@@ -598,6 +598,11 @@ function renderHero() {
   $("#hero-condition").textContent = weatherConditionLabel(current.weather_code);
   $("#hero-feels").textContent = `Feels like ${fmt(current.apparent_temperature, 1)}°C · Dew point ${fmt(current.dew_point_2m, 1)}°C`;
 
+  // A small, always-current confirmation of which city this card describes — separate from
+  // the search bar, which is mid-typing/ambiguous while the user is actively searching.
+  const cityEl = $("#hero-city");
+  if (cityEl) cityEl.textContent = state.city.country ? `${state.city.name}, ${state.city.country}` : state.city.name;
+
   const weatherTime = now.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
   $("#hero-updated").textContent = `AS OF ${weatherTime}`;
   const r24temp = last24hRange(hourly, idx, "temperature_2m");
@@ -1619,6 +1624,11 @@ function showLoadingSkeleton() {
   $("#hero-temp").textContent = "--";
   $("#hero-condition").textContent = "Loading…";
   $("#hero-feels").textContent = "";
+  // Unlike the rest of the hero, this one is set (not blanked) here — state.city is already
+  // the newly-selected city by this point, so showing it during the loading state itself
+  // reassures the user which city's data is on its way in, not just once it arrives.
+  const cityEl = $("#hero-city");
+  if (cityEl) cityEl.textContent = state.city.country ? `${state.city.name}, ${state.city.country}` : state.city.name;
   $("#hero-updated").textContent = "—";
   $("#hero-range").textContent = "—";
   const chip = $("#hero-aqi-chip");
