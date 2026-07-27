@@ -1,6 +1,6 @@
 // App-shell cache only — no build step means this version string is bumped by hand
 // alongside the ?v= on style.css/app.js in index.html whenever either changes.
-const CACHE_NAME = "bwi-shell-20260727f";
+const CACHE_NAME = "bwi-shell-20260727g";
 const SHELL_ASSETS = [
   "./",
   "./index.html",
@@ -32,6 +32,22 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin || event.request.method !== "GET") return;
+
+  // The HTML shell is network-first: a deploy should be visible on the very next load, not
+  // one load later. Falls back to the cached shell only when actually offline. Everything
+  // else (style.css?v=/app.js?v=, icons, manifest) is safe to serve cache-first since its
+  // URL changes whenever its content does — a stale cache entry there is simply never hit.
+  if (event.request.mode === "navigate" || url.pathname.endsWith("/index.html")) {
+    event.respondWith(
+      fetch(event.request)
+        .then((resp) => {
+          if (resp.ok) caches.open(CACHE_NAME).then((cache) => cache.put(event.request, resp.clone()));
+          return resp;
+        })
+        .catch(() => caches.match(event.request))
+    );
+    return;
+  }
 
   event.respondWith(
     caches.match(event.request).then((cached) => {
