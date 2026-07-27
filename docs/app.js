@@ -1571,6 +1571,7 @@ function renderFooter() {
     `Air quality: <a href="https://open-meteo.com/en/docs/air-quality-api" target="_blank" rel="noopener">Open-Meteo Air Quality API</a> (US AQI + pollutants, CAMS model — not ground-station); AQI category shown on this page uses <a href="https://cpcb.nic.in/displaypdf.php?id=aXRzZW5hL0FpcnF1YWxpdHkvTkFRSV9SZXBvcnRfMTQtMDktMjAxNC5wZGY=" target="_blank" rel="noopener">CPCB National AQI (2014)</a> breakpoints. ` +
     `Historical records &amp; normals: <a href="https://open-meteo.com/en/docs/historical-weather-api" target="_blank" rel="noopener">Open-Meteo Historical Weather API</a>, ${HIST_YEARS} years, cached 24h in your browser. ` +
     `City search: <a href="https://open-meteo.com/en/docs/geocoding-api" target="_blank" rel="noopener">Open-Meteo Geocoding API</a>. ` +
+    `"Use my location" resolves your coordinates to a place name via <a href="https://nominatim.org/" target="_blank" rel="noopener">Nominatim</a>, © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>. ` +
     `All fetches run client-side; no server, no API key. Coordinates ${formatLatLon(state.city.lat, state.city.lon)} (${cityLabel(state.city)}).` +
     `<span class="refresh-note">Auto-refreshes every ${Math.round(REFRESH_MS / 60000)} minutes — see the countdown at top right.</span>`;
 }
@@ -1995,10 +1996,31 @@ function selectCity(city) {
   loadAll(false);
 }
 
+// Reverse geocoding: Open-Meteo has no free reverse-lookup endpoint, so this uses
+// Nominatim (OpenStreetMap's free, keyless service — this project already uses OSM data
+// for the basemap). Falls back to a generic label if the lookup fails or times out; the
+// coordinates and every fetched reading are correct either way, only the display name changes.
+async function reverseGeocode(lat, lon) {
+  const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&zoom=10&accept-language=en`;
+  try {
+    const data = await fetchJSON(url, 6000);
+    const a = data.address || {};
+    const name = a.city || a.town || a.village || a.municipality || a.county || a.state;
+    if (!name) return null;
+    return { name, admin1: a.state || "", country: a.country || "", lat, lon };
+  } catch (e) {
+    return null;
+  }
+}
+
 function locateMe(onDone) {
   if (!("geolocation" in navigator)) { onDone(null); return; }
   navigator.geolocation.getCurrentPosition(
-    (pos) => onDone({ name: "My Location", admin1: "", country: "", lat: pos.coords.latitude, lon: pos.coords.longitude }),
+    async (pos) => {
+      const { latitude: lat, longitude: lon } = pos.coords;
+      const resolved = await reverseGeocode(lat, lon);
+      onDone(resolved || { name: "My Location", admin1: "", country: "", lat, lon });
+    },
     () => onDone(null),
     { timeout: 8000, maximumAge: 600000 }
   );
