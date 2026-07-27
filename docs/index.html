@@ -28,7 +28,7 @@
 <!-- bump the ?v= on style.css/app.js (and the matching CACHE_NAME in sw.js) whenever
      either changes — no build step means no content-hashed filenames, so this is what
      forces a stale-cached browser (and the service worker's app-shell cache) to refetch -->
-<link rel="stylesheet" href="style.css?v=20260727f">
+<link rel="stylesheet" href="style.css?v=20260727h">
 </head>
 <body>
 
@@ -63,7 +63,7 @@
         <line x1="11.2" y1="11.2" x2="15" y2="15" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
       </svg>
       <label class="visually-hidden" for="city-search-input">Search for a city</label>
-      <input type="text" id="city-search-input" class="city-search-input" value="Bengaluru" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="city-results" autocomplete="off">
+      <input type="text" id="city-search-input" class="city-search-input" value="Bengaluru (BLR)" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="city-results" autocomplete="off">
       <div id="city-panel" class="city-panel" hidden>
         <button type="button" id="city-locate-btn" class="city-locate-btn">Use my location</button>
         <ul id="city-results" class="city-results" role="listbox" aria-label="City search results"></ul>
@@ -236,6 +236,6 @@
   <footer id="footer"></footer>
 </div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-<script src="app.js?v=20260727f"></script>
+<script src="app.js?v=20260727h"></script>
 </body>
 </html>

@@ -25,6 +25,37 @@ function cityLabel(city, opts) {
   return (opts && opts.short) ? parts.slice(0, 2).join(", ") : parts.join(", ");
 }
 
+// A short, recognizable code (mostly IATA-style) for well-known global cities, purely for
+// display ("Bengaluru (BLR)") — this is a small curated list, not a live lookup (there's no
+// free/keyless API for it), so it only covers major cities. Anything not in the list just
+// shows its plain name rather than fabricating a code that might be wrong.
+const CITY_CODES = {
+  bengaluru: "BLR", bangalore: "BLR", mumbai: "BOM", delhi: "DEL", "new delhi": "DEL",
+  chennai: "MAA", kolkata: "CCU", hyderabad: "HYD", pune: "PNQ", ahmedabad: "AMD",
+  jaipur: "JAI", kochi: "COK", goa: "GOI", lucknow: "LKO", chandigarh: "IXC",
+  "new york": "NYC", "los angeles": "LAX", chicago: "CHI", "san francisco": "SFO",
+  washington: "WAS", boston: "BOS", seattle: "SEA", miami: "MIA", "las vegas": "LAS",
+  toronto: "YTO", vancouver: "YVR", montreal: "YUL", "mexico city": "MEX",
+  london: "LON", paris: "PAR", berlin: "BER", munich: "MUC", frankfurt: "FRA",
+  rome: "ROM", milan: "MIL", madrid: "MAD", barcelona: "BCN", lisbon: "LIS",
+  amsterdam: "AMS", brussels: "BRU", vienna: "VIE", zurich: "ZRH", geneva: "GVA",
+  dublin: "DUB", stockholm: "STO", oslo: "OSL", copenhagen: "CPH", helsinki: "HEL",
+  warsaw: "WAW", prague: "PRG", budapest: "BUD", athens: "ATH", istanbul: "IST",
+  moscow: "MOW", dubai: "DXB", "abu dhabi": "AUH", doha: "DOH", riyadh: "RUH",
+  "tel aviv": "TLV", cairo: "CAI", casablanca: "CAS", lagos: "LOS", nairobi: "NBO",
+  johannesburg: "JNB", "cape town": "CPT", tokyo: "TYO", osaka: "OSA", seoul: "SEL",
+  beijing: "BJS", shanghai: "SHA", "hong kong": "HKG", taipei: "TPE", singapore: "SIN",
+  bangkok: "BKK", "kuala lumpur": "KUL", jakarta: "JKT", manila: "MNL",
+  "ho chi minh city": "SGN", hanoi: "HAN", sydney: "SYD", melbourne: "MEL",
+  brisbane: "BNE", perth: "PER", auckland: "AKL", wellington: "WLG",
+  "são paulo": "SAO", "sao paulo": "SAO", "rio de janeiro": "RIO",
+  "buenos aires": "BUE", santiago: "SCL", lima: "LIM", bogotá: "BOG", bogota: "BOG",
+};
+function cityShortLabel(city) {
+  const code = CITY_CODES[city.name.trim().toLowerCase()];
+  return code ? `${city.name} (${code})` : city.name;
+}
+
 const svgNS = "http://www.w3.org/2000/svg";
 
 /* ============================== UTILS ============================== */
@@ -1922,7 +1953,7 @@ function updatePageMeta() {
 
 function updateCityInputDisplay() {
   const input = $("#city-search-input");
-  if (input) input.value = state.city.name;
+  if (input) input.value = cityShortLabel(state.city);
 }
 
 // Reflects the selected city in the URL (?lat=&lon=&name=…) so a specific city's view is
@@ -2003,7 +2034,11 @@ function closeCityPanel() {
   cityPanelOpen = false;
   panel.hidden = true;
   input.setAttribute("aria-expanded", "false");
-  input.value = state.city.name;
+  input.value = cityShortLabel(state.city);
+  // If the input is still focused (e.g. a city was just picked, which never blurred it —
+  // see the mousedown/preventDefault on options above), leave the text selected so typing
+  // again immediately replaces it instead of inserting into the middle of it.
+  if (document.activeElement === input) input.select();
   cityActiveIndex = -1;
 }
 
@@ -2045,7 +2080,18 @@ function initCitySearch() {
 
   // Focus opens the panel and selects the current text so typing immediately replaces it —
   // the bar doubles as "here's your current city" and "type to change it" in one control.
-  input.addEventListener("focus", () => { openCityPanel(); input.select(); });
+  // The select() is deferred a tick because focusing via a mouse click also places the
+  // cursor at the click point as part of that same click's default action, which would
+  // otherwise collapse the selection right after this handler sets it.
+  input.addEventListener("focus", () => {
+    openCityPanel();
+    setTimeout(() => input.select(), 0);
+  });
+  // A click on an *already-focused* input never re-fires "focus", so a second click (e.g.
+  // right after picking a city, which leaves the field focused) would otherwise just place
+  // the cursor at the click point instead of re-selecting — this is the address-bar-style
+  // "always ready to type over" pattern, so every click re-selects, not just the first.
+  input.addEventListener("click", () => { setTimeout(() => input.select(), 0); });
 
   // A short delay (rather than closing on blur immediately) lets a click on a result option
   // or the locate button register first — both move focus, which would otherwise race the close.
