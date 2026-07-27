@@ -140,8 +140,17 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible, input:focus-vis
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.5); opacity: .6; } }
-.intro-title { font-family: var(--mono); font-weight: 700; font-size: 22px; letter-spacing: 0.35em; opacity: 0; animation: introIn .7s ease .15s forwards; }
-.intro-sub { font-size: 11px; letter-spacing: 0.28em; color: var(--text-low); text-transform: uppercase; opacity: 0; animation: introIn .7s ease .35s forwards; }
+.intro-title {
+  font-family: var(--mono); font-weight: 700; font-size: 22px; letter-spacing: 0.25em;
+  opacity: 0; animation: introIn .7s ease .15s forwards; text-align: center; max-width: 90vw;
+}
+.intro-sub {
+  font-size: 12px; letter-spacing: 0.04em; color: var(--text-low);
+  opacity: 0; animation: introIn .7s ease .35s forwards; text-align: center; max-width: 80vw;
+}
+@media (max-width: 480px) {
+  .intro-title { font-size: 15px; letter-spacing: 0.14em; }
+}
 @keyframes introIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 
 #app { opacity: 0; transition: opacity .5s ease; }
@@ -159,6 +168,43 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible, input:focus-vis
   font-family: var(--mono); font-size: 10.5px; font-weight: 500; color: var(--text-low);
   letter-spacing: 0.14em; text-transform: uppercase;
 }
+
+/* City search — a button styled to match the old static city name, opening a small
+   accessible combobox popover (search input + listbox) anchored below it. */
+.city-search { position: relative; }
+.city {
+  font: inherit; color: inherit; background: none; border: none; margin: 0; padding: 2px 4px;
+  border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;
+  transition: color .15s ease, background-color .15s ease;
+}
+.city:hover { color: var(--accent); }
+.city-caret { opacity: .55; transition: transform .15s ease; flex: none; }
+.city[aria-expanded="true"] .city-caret { transform: rotate(180deg); }
+
+.city-panel {
+  position: absolute; top: calc(100% + 10px); left: 0; z-index: 40; width: min(320px, 88vw);
+  background: var(--card); border: 1px solid var(--border-inset); border-radius: var(--radius);
+  box-shadow: var(--shadow-card); padding: 10px; flex-direction: column; gap: 8px;
+}
+/* An author-stylesheet display value always wins over the UA [hidden]{display:none} default,
+   so the flex layout must be scoped to the un-hidden state or the panel never actually hides. */
+.city-panel:not([hidden]) { display: flex; }
+.city-search-input {
+  font: inherit; font-size: 14px; color: var(--text-hi); background: var(--card-2);
+  border: 1px solid var(--border-inset); border-radius: 8px; padding: 9px 11px; width: 100%;
+}
+.city-search-input::placeholder { color: var(--text-low); }
+.city-locate-btn {
+  font-family: var(--sans); font-size: 12px; font-weight: 600; color: var(--accent);
+  background: none; border: none; text-align: left; padding: 4px 2px; cursor: pointer; align-self: flex-start;
+}
+.city-locate-btn:hover { text-decoration: underline; }
+.city-locate-btn:disabled { opacity: .6; cursor: default; text-decoration: none; }
+.city-results { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow-y: auto; }
+.city-option {
+  font-size: 13.5px; color: var(--text-hi); padding: 9px 10px; border-radius: 7px; cursor: pointer;
+}
+.city-option.active { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--text-hi); }
 .topbar .status { display: flex; align-items: center; gap: 16px; font-size: 11px; color: var(--text-low); letter-spacing: 0.02em; }
 .topbar .status .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--good); display: inline-block; margin-right: 6px; box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 25%, transparent); }
 .topbar .status .dot.stale { background: var(--unhealthy); box-shadow: 0 0 0 3px color-mix(in srgb, var(--unhealthy) 25%, transparent); }

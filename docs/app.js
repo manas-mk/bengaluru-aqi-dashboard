@@ -1,14 +1,29 @@
 "use strict";
 
 /* ============================== CONFIG ============================== */
-const LAT = 12.9716, LON = 77.5946, TZ = "Asia/Kolkata";
+const DEFAULT_CITY = { name: "Bengaluru", admin1: "Karnataka", country: "India", lat: 12.9716, lon: 77.5946 };
+const CITY_STORAGE_KEY = "bwi_city_v1";
 const REFRESH_MS = 15 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 10000;
 const HIST_YEARS = 10;
 const FORECAST_URL = "https://api.open-meteo.com/v1/forecast";
 const AQ_URL = "https://air-quality-api.open-meteo.com/v1/air-quality";
 const ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive";
-const CACHE_STATE_KEY = "bwi_last_good_state_v1";
+const GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search";
+const CACHE_STATE_KEY = "bwi_last_good_state_v2";
+
+// Every per-city cache is namespaced by rounded coordinates so switching cities never
+// shows another city's stale localStorage data while its own fresh fetch is in flight.
+function cityCacheKey(base) {
+  return `${base}:${state.city.lat.toFixed(3)},${state.city.lon.toFixed(3)}`;
+}
+function formatLatLon(lat, lon) {
+  return `${Math.abs(lat).toFixed(4)}°${lat >= 0 ? "N" : "S"}, ${Math.abs(lon).toFixed(4)}°${lon >= 0 ? "E" : "W"}`;
+}
+function cityLabel(city, opts) {
+  const parts = [city.name, city.admin1, city.country].filter(Boolean);
+  return (opts && opts.short) ? parts.slice(0, 2).join(", ") : parts.join(", ");
+}
 
 const svgNS = "http://www.w3.org/2000/svg";
 
@@ -213,8 +228,11 @@ function cpcbOverall(pollutants) {
 }
 
 /* ============================== DATA FETCH ============================== */
+// timezone=auto asks Open-Meteo to resolve the IANA timezone from lat/lon itself — this
+// is what lets every fetch below work for any coordinate on Earth, not just Bengaluru.
 async function fetchForecast() {
-  const url = `${FORECAST_URL}?latitude=${LAT}&longitude=${LON}&timezone=${encodeURIComponent(TZ)}` +
+  const { lat, lon } = state.city;
+  const url = `${FORECAST_URL}?latitude=${lat}&longitude=${lon}&timezone=auto` +
     `&past_days=30&forecast_days=7` +
     `&current=temperature_2m,relative_humidity_2m,apparent_temperature,dew_point_2m,pressure_msl,wind_speed_10m,wind_gusts_10m,wind_direction_10m,cloud_cover,uv_index,precipitation,weather_code,is_day` +
     `&hourly=temperature_2m,apparent_temperature,dew_point_2m,relative_humidity_2m,pressure_msl,wind_speed_10m,wind_gusts_10m,wind_direction_10m,cloud_cover,uv_index,precipitation,precipitation_probability,visibility,weather_code` +
@@ -223,19 +241,21 @@ async function fetchForecast() {
 }
 
 async function fetchAirQuality() {
-  const url = `${AQ_URL}?latitude=${LAT}&longitude=${LON}&timezone=${encodeURIComponent(TZ)}` +
+  const { lat, lon } = state.city;
+  const url = `${AQ_URL}?latitude=${lat}&longitude=${lon}&timezone=auto` +
     `&current=us_aqi,pm2_5,pm10,nitrogen_dioxide,sulphur_dioxide,ozone,carbon_monoxide` +
     `&hourly=pm2_5,pm10,nitrogen_dioxide,sulphur_dioxide,ozone,carbon_monoxide&forecast_days=3`;
   return fetchJSON(url);
 }
 
 async function fetchHistorical() {
-  const cacheKey = "hist_archive_v1";
+  const cacheKey = cityCacheKey("hist_archive_v1");
   const cached = cacheGet(cacheKey, 24 * 3600 * 1000);
   if (cached) return cached.value;
+  const { lat, lon } = state.city;
   const end = addDays(new Date(), -2); // archive lag safety margin
   const start = new Date(end.getFullYear() - HIST_YEARS, 0, 1);
-  const url = `${ARCHIVE_URL}?latitude=${LAT}&longitude=${LON}&timezone=${encodeURIComponent(TZ)}` +
+  const url = `${ARCHIVE_URL}?latitude=${lat}&longitude=${lon}&timezone=auto` +
     `&start_date=${isoDate(start)}&end_date=${isoDate(end)}` +
     `&daily=temperature_2m_max,temperature_2m_min,temperature_2m_mean,precipitation_sum`;
   const data = await fetchJSON(url, 15000);
@@ -243,22 +263,30 @@ async function fetchHistorical() {
   return data;
 }
 
-// Bengaluru is one grid cell in Open-Meteo's modeled (CAMS) air-quality data — there's no
+// A city is one grid cell in Open-Meteo's modeled (CAMS) air-quality data — there's no
 // multi-station API available without a keyed provider, which this project deliberately
-// avoids. This queries the same free/keyless endpoint at a few points spread across the
-// city instead: real numbers, honestly labeled as modeled estimates, not ground stations.
-const CITY_POINTS = [
-  { name: "City Centre", lat: 12.9716, lon: 77.5946 },
-  { name: "Whitefield", lat: 12.9698, lon: 77.7500 },
-  { name: "Electronic City", lat: 12.8452, lon: 77.6602 },
-  { name: "Yelahanka", lat: 13.1007, lon: 77.5963 },
-];
+// avoids. This queries the same free/keyless endpoint at four points offset ~15km N/S/E/W
+// of whatever city is selected: real numbers, honestly labeled as modeled estimates, not
+// ground stations, and labeled by direction/distance since we don't have local place names
+// for an arbitrary global city.
+function nearbyPoints(city) {
+  const dKm = 15;
+  const dLat = dKm / 111;
+  const dLon = dKm / (111 * Math.max(0.05, Math.cos((city.lat * Math.PI) / 180)));
+  return [
+    { name: `~${dKm} km north`, lat: city.lat + dLat, lon: city.lon },
+    { name: `~${dKm} km south`, lat: city.lat - dLat, lon: city.lon },
+    { name: `~${dKm} km east`, lat: city.lat, lon: city.lon + dLon },
+    { name: `~${dKm} km west`, lat: city.lat, lon: city.lon - dLon },
+  ];
+}
 async function fetchCityPointsAqi() {
-  const results = await Promise.allSettled(CITY_POINTS.map((p) => {
-    const url = `${AQ_URL}?latitude=${p.lat}&longitude=${p.lon}&timezone=${encodeURIComponent(TZ)}&current=us_aqi,pm2_5,pm10,nitrogen_dioxide,sulphur_dioxide,ozone,carbon_monoxide`;
+  const points = nearbyPoints(state.city);
+  const results = await Promise.allSettled(points.map((p) => {
+    const url = `${AQ_URL}?latitude=${p.lat}&longitude=${p.lon}&timezone=auto&current=us_aqi,pm2_5,pm10,nitrogen_dioxide,sulphur_dioxide,ozone,carbon_monoxide`;
     return fetchJSON(url, 8000);
   }));
-  return CITY_POINTS.map((p, i) => ({ ...p, data: results[i].status === "fulfilled" ? results[i].value.current : null }));
+  return points.map((p, i) => ({ ...p, data: results[i].status === "fulfilled" ? results[i].value.current : null }));
 }
 
 /* ============================== DERIVED DAILY MAP ============================== */
@@ -300,7 +328,8 @@ function mergeDailyMaps(archiveDaily, hourlyDerived) {
 }
 
 /* ============================== APP STATE ============================== */
-const state = { forecast: null, aq: null, historicalDaily: null, lastLoad: null, nowHourlyIdx: null, stale: false };
+const state = { city: DEFAULT_CITY, forecast: null, aq: null, historicalDaily: null, lastLoad: null, nowHourlyIdx: null, stale: false };
+let citySeq = 0;
 
 /* ============================== WEATHER ICONS ============================== */
 function cloudPath() {
@@ -741,7 +770,7 @@ function renderCityPointsTable() {
   const wrap = el("div");
   wrap.style.marginTop = "16px";
   wrap.appendChild(el("h3", "eyebrow", "Around the City"));
-  const note = el("p", "panel-note", "Modeled (CAMS) estimates at 4 points across Bengaluru — not independent ground monitoring stations.");
+  const note = el("p", "panel-note", `Modeled (CAMS) estimates at 4 points around ${state.city.name} — not independent ground monitoring stations.`);
   wrap.appendChild(note);
   const tableWrap = el("div");
   const table = document.createElement("table");
@@ -1510,7 +1539,8 @@ function renderFooter() {
     `Weather &amp; forecast: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo Forecast API</a>. ` +
     `Air quality: <a href="https://open-meteo.com/en/docs/air-quality-api" target="_blank" rel="noopener">Open-Meteo Air Quality API</a> (US AQI + pollutants, CAMS model — not ground-station); AQI category shown on this page uses <a href="https://cpcb.nic.in/displaypdf.php?id=aXRzZW5hL0FpcnF1YWxpdHkvTkFRSV9SZXBvcnRfMTQtMDktMjAxNC5wZGY=" target="_blank" rel="noopener">CPCB National AQI (2014)</a> breakpoints. ` +
     `Historical records &amp; normals: <a href="https://open-meteo.com/en/docs/historical-weather-api" target="_blank" rel="noopener">Open-Meteo Historical Weather API</a>, ${HIST_YEARS} years, cached 24h in your browser. ` +
-    `All fetches run client-side; no server, no API key. Coordinates ${LAT}, ${LON}.` +
+    `City search: <a href="https://open-meteo.com/en/docs/geocoding-api" target="_blank" rel="noopener">Open-Meteo Geocoding API</a>. ` +
+    `All fetches run client-side; no server, no API key. Coordinates ${formatLatLon(state.city.lat, state.city.lon)} (${cityLabel(state.city)}).` +
     `<span class="refresh-note">Auto-refreshes every ${Math.round(REFRESH_MS / 60000)} minutes — see the countdown at top right.</span>`;
 }
 
@@ -1551,6 +1581,18 @@ function buildErrorCard(message, onRetry) {
 
 /* ============================== LOAD / ORCHESTRATION ============================== */
 function showLoadingSkeleton() {
+  // On a fresh page load these are already "--"/"Loading…" from the static HTML; this
+  // matters most when switching cities, where the hero would otherwise keep showing the
+  // previous city's temperature/AQI while every other card correctly goes to skeleton.
+  $("#hero-temp").textContent = "--";
+  $("#hero-condition").textContent = "Loading…";
+  $("#hero-feels").textContent = "";
+  $("#hero-updated").textContent = "—";
+  $("#hero-range").textContent = "—";
+  const chip = $("#hero-aqi-chip");
+  if (chip) { chip.innerHTML = ""; chip.hidden = true; }
+  const aqiCard = $("#aqi-card");
+  if (aqiCard) aqiCard.style.setProperty("--aqi-tint", "transparent");
   $("#now-stats").innerHTML = Array(6).fill('<div class="stat-card"><div class="skel skel-line" style="width:50%"></div><div class="skel skel-line" style="width:70%;height:24px"></div></div>').join("");
   $("#sun-body").innerHTML = '<div class="skel skel-line"></div><div class="skel skel-line"></div><div class="skel skel-line"></div>';
   $("#aqi-body").innerHTML = '<div class="skel skel-line" style="width:40%;height:30px"></div>';
@@ -1578,10 +1620,13 @@ function updateStaleBadge() {
 }
 
 async function loadAll(isRefresh) {
+  // Guards against a race where a slow fetch for a previously-selected city resolves after
+  // the user has already switched to a different one — the stale response is just dropped.
+  const mySeq = citySeq;
   if (!isRefresh) {
     // Stale-while-revalidate: a returning visitor sees last-known-good data immediately
     // (clearly labeled) instead of a blank skeleton, while a fresh fetch runs underneath.
-    const cached = cacheGet(CACHE_STATE_KEY, null);
+    const cached = cacheGet(cityCacheKey(CACHE_STATE_KEY), null);
     if (cached && cached.value && cached.value.forecast) {
       state.forecast = cached.value.forecast;
       state.aq = cached.value.aq;
@@ -1598,6 +1643,7 @@ async function loadAll(isRefresh) {
   setStatus("Refreshing…");
 
   const results = await Promise.allSettled([fetchForecast(), fetchAirQuality(), fetchHistorical()]);
+  if (mySeq !== citySeq) return; // a newer city was selected while these were in flight
   const [fRes, aqRes, histRes] = results;
 
   if (fRes.status === "fulfilled") {
@@ -1611,7 +1657,7 @@ async function loadAll(isRefresh) {
     } else {
       setStatus("Refresh failed — showing cached data", true);
     }
-    setTimeout(() => loadAll(true), 60000);
+    refreshTimer = setTimeout(() => loadAll(true), 60000);
     return;
   }
 
@@ -1631,7 +1677,7 @@ async function loadAll(isRefresh) {
 
   state.stale = false;
   updateStaleBadge();
-  cacheSet(CACHE_STATE_KEY, { forecast: state.forecast, aq: state.aq, historicalDaily: state.historicalDaily });
+  cacheSet(cityCacheKey(CACHE_STATE_KEY), { forecast: state.forecast, aq: state.aq, historicalDaily: state.historicalDaily });
 
   render(isRefresh);
   state.lastLoad = Date.now();
@@ -1646,11 +1692,11 @@ function renderLocationCard() {
   if (!note || !state.forecast) return;
   const elevation = state.forecast.elevation;
   const elevationTxt = elevation != null ? ` · ${Math.round(elevation)}m elevation` : "";
-  note.textContent = `12.9716°N, 77.5946°E${elevationTxt} — every reading on this page describes this single point.`;
+  note.textContent = `${formatLatLon(state.city.lat, state.city.lon)}${elevationTxt} — every reading on this page describes this single point.`;
 }
 
 /* ============================== WEATHER MAP ============================== */
-let weatherMap = null, weatherMapBasemap = null;
+let weatherMap = null, weatherMapBasemap = null, weatherMapMarker = null;
 
 function weatherMapBasemapUrl() {
   return isDarkTheme()
@@ -1658,11 +1704,21 @@ function weatherMapBasemapUrl() {
     : "https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png";
 }
 
+// Called on init and again whenever the user picks a new city.
+function updateWeatherMapLocation() {
+  const mapEl = $("#weather-map");
+  if (mapEl) mapEl.setAttribute("aria-label", `Minimal map of ${state.city.name} with live precipitation radar overlay`);
+  if (!weatherMap) return;
+  const { lat, lon } = state.city;
+  weatherMap.setView([lat, lon], 9);
+  if (weatherMapMarker) weatherMapMarker.setLatLng([lat, lon]);
+}
+
 function initWeatherMap() {
   const el = document.getElementById("weather-map");
   if (!el || typeof L === "undefined" || weatherMap) return;
 
-  weatherMap = L.map(el, { center: [LAT, LON], zoom: 9, scrollWheelZoom: false, attributionControl: true });
+  weatherMap = L.map(el, { center: [state.city.lat, state.city.lon], zoom: 9, scrollWheelZoom: false, attributionControl: true });
 
   weatherMapBasemap = L.tileLayer(weatherMapBasemapUrl(), {
     subdomains: "abcd", maxZoom: 18,
@@ -1670,7 +1726,7 @@ function initWeatherMap() {
   }).addTo(weatherMap);
 
   const markerIcon = L.divIcon({ className: "map-marker", html: '<span class="map-marker-dot"></span>', iconSize: [14, 14], iconAnchor: [7, 7] });
-  L.marker([LAT, LON], { icon: markerIcon, interactive: false }).addTo(weatherMap);
+  weatherMapMarker = L.marker([state.city.lat, state.city.lon], { icon: markerIcon, interactive: false }).addTo(weatherMap);
 
   fetch("https://api.rainviewer.com/public/weather-maps.json")
     .then((r) => r.json())
@@ -1843,6 +1899,186 @@ function initHeroTilt() {
   card.addEventListener("pointerleave", () => { card.style.transform = ""; });
 }
 
+/* ============================== CITY SEARCH ============================== */
+async function searchCities(query) {
+  const q = query.trim();
+  if (q.length < 2) return [];
+  const url = `${GEOCODE_URL}?name=${encodeURIComponent(q)}&count=8&language=en&format=json`;
+  try {
+    const data = await fetchJSON(url, 6000);
+    return (data.results || []).map((r) => ({
+      name: r.name, admin1: r.admin1 || "", country: r.country || "", lat: r.latitude, lon: r.longitude,
+    }));
+  } catch (e) {
+    return [];
+  }
+}
+
+function updatePageMeta() {
+  document.title = `${state.city.name} — Weather Instrument`;
+  const desc = $('meta[name="description"]');
+  if (desc) desc.setAttribute("content", `Live weather, CPCB-referenced air quality, and climate records for ${cityLabel(state.city)}.`);
+}
+
+function updateBrandUI() {
+  const nameEl = $("#city-btn-name");
+  if (nameEl) nameEl.textContent = state.city.name;
+  const btn = $("#city-btn");
+  if (btn) btn.setAttribute("aria-label", `Change city. Currently showing ${cityLabel(state.city)}.`);
+}
+
+// Reflects the selected city in the URL (?lat=&lon=&name=…) so a specific city's view is
+// bookmarkable/shareable without any server-side routing.
+function updateUrlForCity(city) {
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.set("lat", city.lat.toFixed(4));
+    url.searchParams.set("lon", city.lon.toFixed(4));
+    url.searchParams.set("name", city.name);
+    if (city.admin1) url.searchParams.set("admin1", city.admin1); else url.searchParams.delete("admin1");
+    if (city.country) url.searchParams.set("country", city.country); else url.searchParams.delete("country");
+    window.history.replaceState({}, "", url);
+  } catch (e) { /* ignore */ }
+}
+function cityFromUrl() {
+  try {
+    const p = new URLSearchParams(window.location.search);
+    const lat = parseFloat(p.get("lat")), lon = parseFloat(p.get("lon"));
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    return { name: p.get("name") || "Selected location", admin1: p.get("admin1") || "", country: p.get("country") || "", lat, lon };
+  } catch (e) { return null; }
+}
+
+function selectCity(city) {
+  citySeq++; // invalidates any in-flight fetch for the previously selected city
+  clearTimeout(refreshTimer);
+  clearTimeout(feedRetryTimers.aq);
+  clearTimeout(feedRetryTimers.hist);
+  clearInterval(countdownTimer);
+  state.city = city;
+  state.forecast = null; state.aq = null; state.historicalDaily = null; state.nowHourlyIdx = null; state.stale = false;
+  try { localStorage.setItem(CITY_STORAGE_KEY, JSON.stringify(city)); } catch (e) { /* quota etc */ }
+  updateUrlForCity(city);
+  updateBrandUI();
+  updatePageMeta();
+  updateWeatherMapLocation();
+  closeCityPanel();
+  loadAll(false);
+}
+
+function locateMe(onDone) {
+  if (!("geolocation" in navigator)) { onDone(null); return; }
+  navigator.geolocation.getCurrentPosition(
+    (pos) => onDone({ name: "My Location", admin1: "", country: "", lat: pos.coords.latitude, lon: pos.coords.longitude }),
+    () => onDone(null),
+    { timeout: 8000, maximumAge: 600000 }
+  );
+}
+
+// URL param (shared link) > last city the user picked > browser geolocation > Bengaluru default.
+function bootCity(done) {
+  const fromUrl = cityFromUrl();
+  if (fromUrl) { done(fromUrl); return; }
+  try {
+    const stored = localStorage.getItem(CITY_STORAGE_KEY);
+    if (stored) { done(JSON.parse(stored)); return; }
+  } catch (e) { /* ignore */ }
+  locateMe((city) => done(city || DEFAULT_CITY));
+}
+
+let cityPanelOpen = false, cityActiveIndex = -1, cityResults = [];
+
+function openCityPanel() {
+  const panel = $("#city-panel"), btn = $("#city-btn"), input = $("#city-search-input");
+  if (!panel || !btn) return;
+  cityPanelOpen = true;
+  panel.hidden = false;
+  btn.setAttribute("aria-expanded", "true");
+  if (input) input.setAttribute("aria-expanded", "true");
+  renderCityResults([]);
+  if (input) { input.value = ""; input.focus(); }
+}
+function closeCityPanel() {
+  const panel = $("#city-panel"), btn = $("#city-btn"), input = $("#city-search-input");
+  if (!panel || !btn) return;
+  cityPanelOpen = false;
+  panel.hidden = true;
+  btn.setAttribute("aria-expanded", "false");
+  if (input) input.setAttribute("aria-expanded", "false");
+  cityActiveIndex = -1;
+}
+
+function renderCityResults(results) {
+  cityResults = results;
+  cityActiveIndex = results.length ? 0 : -1;
+  const list = $("#city-results");
+  if (!list) return;
+  list.innerHTML = "";
+  results.forEach((r, i) => {
+    const li = el("li", "city-option" + (i === cityActiveIndex ? " active" : ""), cityLabel(r));
+    li.id = `city-opt-${i}`;
+    li.setAttribute("role", "option");
+    li.setAttribute("aria-selected", i === cityActiveIndex ? "true" : "false");
+    li.addEventListener("mousedown", (e) => { e.preventDefault(); selectCity(r); });
+    list.appendChild(li);
+  });
+  const input = $("#city-search-input");
+  if (input) input.setAttribute("aria-activedescendant", cityActiveIndex >= 0 ? `city-opt-${cityActiveIndex}` : "");
+}
+
+function highlightCityOption(delta) {
+  if (!cityResults.length) return;
+  cityActiveIndex = (cityActiveIndex + delta + cityResults.length) % cityResults.length;
+  const list = $("#city-results");
+  if (list) {
+    list.querySelectorAll(".city-option").forEach((opt, i) => {
+      opt.classList.toggle("active", i === cityActiveIndex);
+      opt.setAttribute("aria-selected", i === cityActiveIndex ? "true" : "false");
+    });
+  }
+  const input = $("#city-search-input");
+  if (input) input.setAttribute("aria-activedescendant", `city-opt-${cityActiveIndex}`);
+}
+
+function initCitySearch() {
+  const btn = $("#city-btn"), panel = $("#city-panel"), input = $("#city-search-input"), locateBtn = $("#city-locate-btn");
+  if (!btn || !panel || !input) return;
+
+  btn.addEventListener("click", () => { if (cityPanelOpen) closeCityPanel(); else openCityPanel(); });
+  document.addEventListener("click", (e) => {
+    if (cityPanelOpen && !panel.contains(e.target) && !btn.contains(e.target)) closeCityPanel();
+  });
+
+  let debounceTimer = null;
+  input.addEventListener("input", () => {
+    clearTimeout(debounceTimer);
+    const q = input.value;
+    debounceTimer = setTimeout(async () => {
+      const results = await searchCities(q);
+      if (cityPanelOpen) renderCityResults(results);
+    }, 300);
+  });
+
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); highlightCityOption(1); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); highlightCityOption(-1); }
+    else if (e.key === "Enter") { e.preventDefault(); if (cityActiveIndex >= 0 && cityResults[cityActiveIndex]) selectCity(cityResults[cityActiveIndex]); }
+    else if (e.key === "Escape") { closeCityPanel(); btn.focus(); }
+  });
+
+  if (locateBtn) {
+    locateBtn.addEventListener("click", () => {
+      locateBtn.disabled = true;
+      locateBtn.textContent = "Locating…";
+      locateMe((city) => {
+        locateBtn.disabled = false;
+        locateBtn.textContent = "Use my location";
+        if (city) selectCity(city);
+      });
+    });
+  }
+}
+
 /* ============================== INIT ============================== */
 let resizeDebounce = null;
 window.addEventListener("resize", () => {
@@ -1862,7 +2098,14 @@ initForecastExpand();
 initHeroTilt();
 initWeatherMap();
 initTabs();
-loadAll(false);
+initCitySearch();
+bootCity((city) => {
+  state.city = city;
+  updateBrandUI();
+  updatePageMeta();
+  updateWeatherMapLocation();
+  loadAll(false);
+});
 
 // Offline app-shell support — never intercepts the weather/AQI API calls or map tiles
 // (see sw.js), which already have their own localStorage-based freshness handling.
