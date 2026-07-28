@@ -1,8 +1,9 @@
 "use strict";
 
 /* ============================== CONFIG ============================== */
+// Only used as the initial placeholder shape for state.city before any real city is chosen
+// (the welcome panel covers the content until then) — not an automatic fallback anymore.
 const DEFAULT_CITY = { name: "Bengaluru", admin1: "Karnataka", country: "India", lat: 12.9716, lon: 77.5946 };
-const CITY_STORAGE_KEY = "bwi_city_v1";
 const REFRESH_MS = 15 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 10000;
 const HIST_YEARS = 10;
@@ -2073,6 +2074,11 @@ function cityFromUrl() {
   } catch (e) { return null; }
 }
 
+// Every visit starts fresh (no remembered last city) — this is the one place a city ever
+// becomes "the current city," whether that's the user's first pick of the session or a
+// later switch. citySelected tracks whether this is the first time, since a few things
+// (revealing #now-bento, initializing the map) only need to happen once.
+let citySelected = false;
 function selectCity(city) {
   citySeq++; // invalidates any in-flight fetch for the previously selected city
   clearTimeout(refreshTimer);
@@ -2081,10 +2087,14 @@ function selectCity(city) {
   clearInterval(countdownTimer);
   state.city = city;
   state.forecast = null; state.aq = null; state.historicalDaily = null; state.nowHourlyIdx = null; state.stale = false;
-  try { localStorage.setItem(CITY_STORAGE_KEY, JSON.stringify(city)); } catch (e) { /* quota etc */ }
   updateUrlForCity(city);
   updateCityInputDisplay();
   updatePageMeta();
+  if (!citySelected) {
+    citySelected = true;
+    hideWelcomePanel();
+    initWeatherMap(); // deferred until now — initializing Leaflet in a hidden container mis-sizes it
+  }
   updateWeatherMapLocation();
   closeCityPanel();
   loadAll(false);
@@ -2120,15 +2130,32 @@ function locateMe(onDone) {
   );
 }
 
-// URL param (shared link) > last city the user picked > browser geolocation > Bengaluru default.
-function bootCity(done) {
-  const fromUrl = cityFromUrl();
-  if (fromUrl) { done(fromUrl); return; }
-  try {
-    const stored = localStorage.getItem(CITY_STORAGE_KEY);
-    if (stored) { done(JSON.parse(stored)); return; }
-  } catch (e) { /* ignore */ }
-  locateMe((city) => done(city || DEFAULT_CITY));
+// Every fresh visit (without a shared-link URL) shows the welcome panel and waits for an
+// explicit choice — search or "Use my location" — rather than silently restoring whatever
+// city was viewed last time.
+function showWelcomePanel() {
+  const panel = $("#welcome-panel");
+  if (panel) panel.hidden = false;
+  setStatus("Waiting for a city…");
+}
+function hideWelcomePanel() {
+  const panel = $("#welcome-panel");
+  if (panel) panel.hidden = true;
+  const bento = $("#now-bento");
+  if (bento) bento.hidden = false;
+}
+function initWelcomePanel() {
+  const btn = $("#welcome-locate-btn");
+  if (!btn) return;
+  btn.addEventListener("click", () => {
+    btn.disabled = true;
+    btn.textContent = "Locating…";
+    locateMe((city) => {
+      btn.disabled = false;
+      btn.textContent = "Use my location";
+      if (city) selectCity(city);
+    });
+  });
 }
 
 let cityPanelOpen = false, cityActiveIndex = -1, cityResults = [];
@@ -2262,16 +2289,18 @@ initTheme();
 initTrendToggle();
 initForecastExpand();
 initHeroTilt();
-initWeatherMap();
 initTabs();
 initCitySearch();
-bootCity((city) => {
-  state.city = city;
-  updateCityInputDisplay();
-  updatePageMeta();
-  updateWeatherMapLocation();
-  loadAll(false);
-});
+initWelcomePanel();
+
+// A shared link (?lat=&lon=&name=…) is explicit intent — load it directly. Otherwise every
+// visit starts fresh: the welcome panel waits for the user to search or share their location
+// rather than silently restoring a previously-viewed city. initWeatherMap() is deferred into
+// selectCity() itself either way, since initializing Leaflet inside the still-hidden
+// #now-bento would mis-size the map.
+const urlCity = cityFromUrl();
+if (urlCity) selectCity(urlCity);
+else showWelcomePanel();
 
 // Offline app-shell support — never intercepts the weather/AQI API calls or map tiles
 // (see sw.js), which already have their own localStorage-based freshness handling.

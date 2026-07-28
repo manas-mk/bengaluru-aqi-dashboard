@@ -28,7 +28,7 @@
 <!-- bump the ?v= on style.css/app.js (and the matching CACHE_NAME in sw.js) whenever
      either changes — no build step means no content-hashed filenames, so this is what
      forces a stale-cached browser (and the service worker's app-shell cache) to refetch -->
-<link rel="stylesheet" href="style.css?v=20260727m">
+<link rel="stylesheet" href="style.css?v=20260727n">
 </head>
 <body>
 
@@ -96,7 +96,18 @@
     <!-- ============ NOW ============ -->
     <section class="tab-panel active" id="tab-now" role="tabpanel" aria-labelledby="tabbtn-now">
       <h2 class="visually-hidden">Now — Current Conditions</h2>
-      <div class="bento-grid" id="now-bento">
+      <div id="welcome-panel" class="welcome-panel">
+        <span class="welcome-mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32" width="40" height="40">
+            <circle cx="16" cy="16" r="15" style="fill:var(--card-2);stroke:var(--border-inset)"/>
+            <circle cx="16" cy="16" r="7" style="fill:var(--accent)"/>
+          </svg>
+        </span>
+        <h3>Pick a city to get started</h3>
+        <p>Search for any city using the bar above, or share your location for an instant local forecast.</p>
+        <button type="button" id="welcome-locate-btn" class="welcome-locate-btn">Use my location</button>
+      </div>
+      <div class="bento-grid" id="now-bento" hidden>
         <div class="hero-card area-hero" id="hero-card">
           <div class="hero-landmark" id="hero-landmark" aria-hidden="true"></div>
           <div class="hero-icon" id="hero-icon" aria-hidden="true"></div>
@@ -238,6 +249,6 @@
   <footer id="footer"></footer>
 </div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-<script src="app.js?v=20260727m"></script>
+<script src="app.js?v=20260727n"></script>
 </body>
 </html>
